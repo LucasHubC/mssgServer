@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"mssgServer/infra/log"
 	"sync"
+
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 )
 
 // WSServer 服务器端
@@ -20,14 +22,26 @@ type WSServer struct {
 	property map[string]interface{}
 
 	propertyLock sync.RWMutex
+
+	// limiter 每连接令牌桶限流器
+	// 每秒最多 30 条消息，突发最多 50 条
+	limiter *rate.Limiter
+
+	// done 通知 wsHandler 连接已关闭
+	done chan struct{}
+
+	// once 保证 Close 只执行一次
+	once sync.Once
 }
 
 func newWsServer(wsConn *websocket.Conn) *WSServer {
 	return &WSServer{
 		wsConn:   wsConn,
-		outChan:  make(chan *WsMsgResp),
+		outChan:  make(chan *WsMsgResp, 256),
 		property: make(map[string]interface{}),
 		Seq:      0,
+		limiter:  rate.NewLimiter(30, 50),
+		done:     make(chan struct{}),
 	}
 }
 
@@ -119,7 +133,14 @@ func (s *WSServer) readMsgLoop() {
 			log.Warn("unmarshal message failed", "addr", s.Addr(), "err", err, "raw", string(messageData))
 			break
 		}
-		//路由
+
+		// ✅ 限流检查：Allow 不阻塞，超限直接断开
+		if !s.limiter.Allow() {
+			log.Warn("rate limit exceeded, disconnecting", "addr", s.Addr())
+			break
+		}
+
+		// 路由
 		req := &WsMsgReq{Body: body, Conn: s}
 		rsp := &WsMsgResp{Body: &RespBody{Name: body.Name, Seq: req.Body.Seq}}
 		s.router.Run(req, rsp)
@@ -130,6 +151,17 @@ func (s *WSServer) readMsgLoop() {
 	s.Close()
 }
 
+// Close 关闭连接，幂等（sync.Once 保证只执行一次）
+// 关闭顺序：先 close outChan（让 writeMsgLoop 退出），再关 wsConn
 func (s *WSServer) Close() {
-	s.wsConn.Close()
+	s.once.Do(func() {
+		close(s.outChan)
+		s.wsConn.Close()
+		close(s.done)
+	})
+}
+
+// WaitClose 阻塞等连接关闭（wsHandler 里用）
+func (s *WSServer) WaitClose() {
+	<-s.done
 }

@@ -26,6 +26,4 @@ func main() {
 	s.Router(router)
 	s.Start()
 
-	//log.Println("login server start success")
-
 }

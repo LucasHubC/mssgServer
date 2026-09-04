@@ -45,21 +45,33 @@ func (g *group) exec(name string, req *WsMsgReq, rsp *WsMsgResp) {
 }
 
 func (r *Router) Run(req *WsMsgReq, rsp *WsMsgResp) {
-	//req.Body.Name  路由key 登录业务  account.login
-
 	strs := strings.Split(req.Body.Name, ".")
 	prefix := ""
 	name := ""
-
 	if len(strs) == 2 {
 		prefix = strs[0]
 		name = strs[1]
 	}
 
+	// 遍历所有组，找匹配的 handler
+	found := false
 	for _, g := range r.group {
 		if g.prefix == prefix {
-			g.exec(name, req, rsp)
+			for h, handler := range g.handlerMap {
+				if h == name {
+					handler(req, rsp)
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
 		}
 	}
 
+	if !found {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "route not found: " + req.Body.Name}
+	}
 }

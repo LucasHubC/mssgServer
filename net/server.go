@@ -1,8 +1,9 @@
 package net
 
 import (
-	"log"
+	"mssgServer/infra/log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -23,15 +24,20 @@ func (s *Server) Router(r *Router) {
 }
 
 func (s *Server) Start() {
-	log.Println("Server Start: " + s.address)
-
-	http.HandleFunc("/", s.wsHandler)
-	err := http.ListenAndServe(s.address, nil)
-
-	if err != nil {
-		log.Fatal("ListenAndServe failed: " + err.Error())
+	srv := &http.Server{
+		Addr:           s.address,
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
+	http.HandleFunc("/", s.wsHandler)
+
+	log.Info("server starting", "addr", s.address)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Error("listen and serve failed", "addr", s.address, "err", err)
+	}
 }
 
 var wsUpgrader = websocket.Upgrader{
@@ -41,41 +47,33 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
-	wsConn, err := wsUpgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println("Upgrade failed: " + err.Error())
+	// ① Upgrade 之前先查连接数，满了返回 503
+	if ConnManager.Total() >= ConnManager.MaxConns() {
+		http.Error(w, "server full", http.StatusServiceUnavailable)
 		return
 	}
-	//defer wsConn.Close()
 
+	// ② 升级 WebSocket
+	wsConn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Error("websocket upgrade failed", "remote", r.RemoteAddr, "err", err)
+		return
+	}
+
+	// ③ 注册到全局连接管理器
 	wsServer := newWsServer(wsConn)
-	wsServer.Start()
 	wsServer.Router(s.router)
+	ConnManager.Register(wsServer)
+	defer ConnManager.Unregister(wsServer)
 
-	//websocket 连接通道建立以后 不管是客户端还是服务器 都可以收发消息
+	log.Info("client connected", "addr", wsConn.RemoteAddr().String(), "total", ConnManager.Total())
 
-	//发消息的是时候 把消息当作路由 来去处理 消息是有格式的 先定义消息的格式 再根据消息的格式去处理消息
+	// ④ 启动收发循环（非阻塞）
+	wsServer.Start()
 
-	// werr := wsConn.WriteMessage(websocket.TextMessage, []byte("hello world"))
-	// if werr != nil {
-	// 	log.Println("WriteMessage failed: " + werr.Error())
-	// }
+	// ⑤ 阻塞等连接关闭 —— 等 readMsgLoop/Close 把 done channel 关掉
+	// 这样 defer Unregister 会在连接真正断开后才执行
+	wsServer.WaitClose()
 
-	// for {
-	// 	messageType, message, err := wsConn.ReadMessage()  // 阻塞等待客户端发来消息
-	// 	if err != nil {
-	// 		log.Println("ReadMessage failed:", err)
-	// 		break  // 出错就跳出循环
-	// 	}
-
-	// 	log.Printf("收到消息: %s\n", string(message))
-
-	// 	// 回给客户端
-	// 	err = wsConn.WriteMessage(messageType, message)
-	// 	if err != nil {
-	// 		log.Println("WriteMessage failed:", err)
-	// 		break
-	// 	}
-	// }
-
+	log.Info("client disconnected", "addr", wsConn.RemoteAddr().String(), "total", ConnManager.Total())
 }
