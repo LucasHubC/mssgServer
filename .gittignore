@@ -1,0 +1,24 @@
+# 编译产物
+*.exe
+*.exe~
+*.dll
+*.so
+
+# 日志目录
+logs/
+*.log
+
+# 本地 IDE
+.idea/
+.vscode/
+*.swp
+
+# Go
+vendor/
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 环境变量/本地覆盖配置
+conf/conf.local.ini

@@ -1,0 +1,4 @@
+time=2026-09-04T11:11:12.533+08:00 level=INFO msg="logger initialized" level=debug format=text output=e:/mssgServer/logs/app.log
+time=2026-09-04T11:11:12.552+08:00 level=ERROR msg="DB init failed:" !BADKEY="db.Ping failed: dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."
+time=2026-09-04T11:16:37.878+08:00 level=INFO msg="logger initialized" level=debug format=text output=dual:e:/mssgServer/logs/app.log
+time=2026-09-04T11:16:37.897+08:00 level=ERROR msg="DB init failed:" !BADKEY="db.Ping failed: dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."
