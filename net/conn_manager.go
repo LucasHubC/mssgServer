@@ -15,8 +15,8 @@ type ConnectionManager struct {
 	maxConns int64                  // 最大允许连接数
 }
 
-// ConnManager 全局单例，默认最多 5000 连接
-var ConnManager = NewConnectionManager(5000)
+// ConnManager 全局单例，默认最多 20000 连接
+var ConnManager = NewConnectionManager(20000)
 
 func NewConnectionManager(maxConns int64) *ConnectionManager {
 	return &ConnectionManager{

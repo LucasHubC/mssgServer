@@ -9,6 +9,12 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// workerPool 全局消息处理协程池（用 channel 做信号量）
+// 上限 2048：单实例 2048 个并发 handler 执行
+// 超过时 readMsgLoop 会阻塞等待，但由于 DB 连接池已有 1000，
+// 正常情况下不会打满。如果打满说明 DB 是真瓶颈了。
+var workerPool = make(chan struct{}, 2048)
+
 // WSServer 服务器端
 type WSServer struct {
 	wsConn *websocket.Conn
@@ -74,8 +80,8 @@ func (s *WSServer) Addr() string {
 	return s.wsConn.RemoteAddr().String()
 }
 
+// Push 向本连接推送消息（非阻塞，outChan 满时丢弃并记日志）
 func (s *WSServer) Push(name string, data interface{}) {
-
 	rsp := &WsMsgResp{
 		Body: &RespBody{
 			Seq:  s.Seq,
@@ -84,7 +90,12 @@ func (s *WSServer) Push(name string, data interface{}) {
 			Msg:  data,
 		},
 	}
-	s.outChan <- rsp
+
+	select {
+	case s.outChan <- rsp:
+	default:
+		log.Warn("Push: outChan full, drop message", "addr", s.Addr(), "name", name)
+	}
 }
 
 // 通道一旦建立 那么收发消息都要持续去监听通道
@@ -140,12 +151,34 @@ func (s *WSServer) readMsgLoop() {
 			break
 		}
 
-		// 路由
+		// 路由（异步化：丢到 worker pool 执行，不阻塞 read loop）
 		req := &WsMsgReq{Body: body, Conn: s}
 		rsp := &WsMsgResp{Body: &RespBody{Name: body.Name, Seq: req.Body.Seq}}
-		s.router.Run(req, rsp)
-		s.outChan <- rsp
 
+		select {
+		case workerPool <- struct{}{}:
+			// 抢到 worker，异步执行 handler
+			go func() {
+				defer func() { <-workerPool }()
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error("handler panic", "addr", s.Addr(), "name", body.Name, "err", r)
+					}
+				}()
+				s.router.Run(req, rsp)
+				// Push 失败不影响主流程（outChan 满了跳过，见 Broadcast 的处理）
+				select {
+				case s.outChan <- rsp:
+				default:
+					log.Warn("outChan full, drop response", "addr", s.Addr(), "name", body.Name)
+				}
+			}()
+		default:
+			// worker pool 满了，降级为同步执行（极端保护）
+			log.Warn("worker pool full, fallback to sync", "addr", s.Addr())
+			s.router.Run(req, rsp)
+			s.outChan <- rsp
+		}
 	}
 
 	s.Close()
