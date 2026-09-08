@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"mssgServer/config"
 	"mssgServer/infra/log"
+	"mssgServer/infra/rpc"
 	"mssgServer/net"
 	"mssgServer/server/login"
 	"os"
@@ -18,6 +19,7 @@ func main() {
 	log.Init()
 	host := config.File.MustValue("login_server", "host", "127.0.0.1")
 	port := config.File.MustValue("login_server", "port", "8003")
+	gatewayURL := config.File.MustValue("gateway", "url", "http://127.0.0.1:9000")
 
 	// ✅ 初始化数据库（失败直接退出）
 	// if err := db.Init(); err != nil {
@@ -29,6 +31,30 @@ func main() {
 	router := net.NewRouter()
 	login.Init(router)
 	s.Router(router)
+
+	// ──── 🆕 向 Gateway 注册 + 定期心跳 ────
+	nodeAddr := fmt.Sprintf("ws://%s:%s", host, port)
+	httpAddr := fmt.Sprintf("http://%s:%s", host, port) // 这里可以和 ws 共用同一端口
+	if err := rpc.Register(gatewayURL, rpc.NodeRegisterReq{
+		Type:     "login",
+		Addr:     nodeAddr,
+		HTTPAddr: httpAddr,
+		MaxConns: net.ConnManager.MaxConns(),
+	}); err != nil {
+		log.Warn("register to gateway failed (is gateway running?):", err)
+	}
+	// 心跳协程：每 5s 上报一次当前在线人数
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			rpc.Heartbeat(gatewayURL, rpc.NodeHeartbeatReq{
+				Type:   "login",
+				Addr:   nodeAddr,
+				Online: net.ConnManager.Total(),
+			})
+		}
+	}()
 
 	// ──── 优雅关闭：监听 Ctrl+C / SIGTERM ────
 	// 必须放在 s.Start() 之前，因为 Start() 内部 ListenAndServe 是阻塞的
