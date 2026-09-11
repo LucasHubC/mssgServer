@@ -1,2 +1,0 @@
-time=2026-09-04T11:31:22.305+08:00 level=INFO msg="logger initialized" level=debug format=text output=dual:e:/mssgServer/logs/app.log
-time=2026-09-04T11:31:22.309+08:00 level=ERROR msg="DB init failed:" !BADKEY="db.Ping failed: dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."

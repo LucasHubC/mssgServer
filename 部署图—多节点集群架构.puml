@@ -1,0 +1,62 @@
+@startuml
+title mssgServer 多节点集群部署架构
+
+' 客户端
+rectangle "客户端" as client
+
+' 服务器 A
+rectangle "云服务器 A (2C4G)" as A {
+  artifact "Gateway\n端口:9000" as gw
+  artifact "loginServer-1\n端口:8001" as ls1
+  database "MySQL" as mysql
+  database "Redis" as redis
+}
+
+' 服务器 B
+rectangle "云服务器 B (2C4G)" as B {
+  artifact "loginServer-2\n端口:8002" as ls2
+  artifact "chatServer-1\n端口:8003" as cs1
+}
+
+' 服务器 C
+rectangle "云服务器 C (2C4G)" as C {
+  artifact "loginServer-3\n端口:8004" as ls3
+}
+
+' 客户端 → Gateway
+client --> gw : "① HTTP /gateway/route"
+
+' Gateway ←→ 各节点
+gw <--> ls1 : "注册 + 5s 心跳"
+gw <--> ls2 : "注册 + 5s 心跳"
+gw <--> ls3 : "注册 + 5s 心跳"
+gw <--> cs1 : "注册 + 5s 心跳"
+
+' 客户端 → 后端（直连）
+client --> ls1 : "③ WebSocket"
+client --> ls2 : "③ WebSocket"
+client --> ls3 : "③ WebSocket"
+client --> cs1 : "③ WebSocket"
+
+' 后端 → MySQL
+ls1 --> mysql
+ls2 --> mysql
+ls3 --> mysql
+
+' 后端 → Redis
+ls1 --> redis
+ls2 --> redis
+ls3 --> redis
+cs1 --> redis
+
+note right of gw
+  Gateway 只做 HTTP 路由发现
+  无状态，可水平扩容
+end note
+
+note right of redis
+  Pub/Sub: "node:broadcast"
+  跨节点踢人 / 推送
+end note
+
+@enduml

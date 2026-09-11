@@ -330,12 +330,20 @@ func parseSize(s string) int64 {
 //  用法：
 //    log.Info("server start", "addr", addr)
 //    log.Error("db query failed", "err", err, "sql", sql)
+//  如果 L 没初始化，自动降级用 slog.Default()（不会 panic）
 // ────────────────────────────────────────────────────────────────
 
-func Debug(msg string, args ...any) { L.Debug(msg, args...) }
-func Info(msg string, args ...any)  { L.Info(msg, args...) }
-func Warn(msg string, args ...any)  { L.Warn(msg, args...) }
-func Error(msg string, args ...any) { L.Error(msg, args...) }
+func defaultLogger() *slog.Logger {
+	if L != nil {
+		return L
+	}
+	return slog.Default()
+}
+
+func Debug(msg string, args ...any) { defaultLogger().Debug(msg, args...) }
+func Info(msg string, args ...any)  { defaultLogger().Info(msg, args...) }
+func Warn(msg string, args ...any)  { defaultLogger().Warn(msg, args...) }
+func Error(msg string, args ...any) { defaultLogger().Error(msg, args...) }
 
 // Fatal 输出 error 日志后退出进程
 func Fatal(msg string, args ...any) {

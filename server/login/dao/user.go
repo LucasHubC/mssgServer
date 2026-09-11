@@ -2,9 +2,11 @@ package dao
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"mssgServer/config/db"
+	rediscache "mssgServer/infra/redis"
 	"strings"
 )
 
@@ -42,8 +44,18 @@ func (d *userDAO) GetById(id int64) (*User, error) {
 	return u, nil
 }
 
-// GetByUid 按业务 UId 查（uid 是业务唯一标识，比如 "1001"）
+// GetByUid 按业务 UId 查（带 Redis 缓存）
 func (d *userDAO) GetByUid(uid string) (*User, error) {
+	// ① 先查缓存
+	key := rediscache.UserCacheKeyByUid(uid)
+	if data, ok := rediscache.GetUserCache(key); ok {
+		var u User
+		if err := json.Unmarshal(data, &u); err == nil {
+			return &u, nil
+		}
+	}
+
+	// ② 查 MySQL
 	u := &User{}
 	err := db.DB.QueryRow(
 		"SELECT id, uid, username, password FROM users WHERE uid = ?",
@@ -56,11 +68,25 @@ func (d *userDAO) GetByUid(uid string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// ③ 回写缓存
+	data, _ := json.Marshal(u)
+	rediscache.SetUserCache(key, data)
 	return u, nil
 }
 
-// GetByUsername 按用户名查（登录时用）
+// GetByUsername 按用户名查（登录时用，带 Redis 缓存）
 func (d *userDAO) GetByUsername(username string) (*User, error) {
+	// ① 先查缓存
+	key := rediscache.UserCacheKeyByUsername(username)
+	if data, ok := rediscache.GetUserCache(key); ok {
+		var u User
+		if err := json.Unmarshal(data, &u); err == nil {
+			return &u, nil
+		}
+	}
+
+	// ② 查 MySQL
 	u := &User{}
 	err := db.DB.QueryRow(
 		"SELECT id, uid, username, password FROM users WHERE username = ?",
@@ -73,6 +99,11 @@ func (d *userDAO) GetByUsername(username string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// ③ 回写缓存（同时缓存 uid key，方便 GetByUid 也能命中）
+	data, _ := json.Marshal(u)
+	rediscache.SetUserCache(key, data)
+	rediscache.SetUserCache(rediscache.UserCacheKeyByUid(u.UId), data)
 	return u, nil
 }
 
@@ -181,6 +212,7 @@ func (d *userDAO) Count() (int, error) {
 // ────────────────────────────────────────
 
 // Create 新增用户，返回自增主键 ID
+// 同时会把自增 ID 写回 u.Id（调用者可以直接从 u.Id 拿到）
 func (d *userDAO) Create(u *User) (int64, error) {
 	result, err := db.DB.Exec(
 		"INSERT INTO users (uid, username, password) VALUES (?, ?, ?)",
@@ -189,10 +221,12 @@ func (d *userDAO) Create(u *User) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("create user failed: %w", err)
 	}
-	return result.LastInsertId()
+	// 把自增 ID 写回 u.Id，方便调用者后续使用
+	u.Id, _ = result.LastInsertId()
+	return u.Id, nil
 }
 
-// Update 修改用户基础信息
+// Update 修改用户基础信息（同步删缓存）
 func (d *userDAO) Update(u *User) error {
 	_, err := db.DB.Exec(
 		"UPDATE users SET username = ?, password = ? WHERE id = ?",
@@ -201,11 +235,24 @@ func (d *userDAO) Update(u *User) error {
 	if err != nil {
 		return fmt.Errorf("update user failed: %w", err)
 	}
+	// 删缓存，下次读会从 DB 拉最新的
+	rediscache.DelUserCache(rediscache.UserCacheKeyByUid(u.UId))
+	rediscache.DelUserCache(rediscache.UserCacheKeyByUsername(u.Username))
 	return nil
 }
 
 // UpdatePassword 修改密码（只传 uid 和新密码即可）
 func (d *userDAO) UpdatePassword(uid, newPwd string) error {
+	// ① 先查一次，拿到 username（后面删缓存要用）
+	u, err := d.GetByUid(uid)
+	if err != nil {
+		return fmt.Errorf("query user failed: %w", err)
+	}
+	if u == nil {
+		return errors.New("user not found, no rows updated")
+	}
+
+	// ② 执行 UPDATE
 	result, err := db.DB.Exec(
 		"UPDATE users SET password = ? WHERE uid = ?",
 		newPwd, uid,
@@ -213,15 +260,30 @@ func (d *userDAO) UpdatePassword(uid, newPwd string) error {
 	if err != nil {
 		return fmt.Errorf("update password failed: %w", err)
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if affected, _ := result.RowsAffected(); affected == 0 {
 		return errors.New("user not found, no rows updated")
 	}
+
+	// ③ 删缓存（两个 key 都删干净）
+	rediscache.DelUserCache(
+		rediscache.UserCacheKeyByUid(uid),
+		rediscache.UserCacheKeyByUsername(u.Username),
+	)
 	return nil
 }
 
 // UpdateUsername 修改用户名
 func (d *userDAO) UpdateUsername(uid, newName string) error {
+	// ① 先查一次，拿到旧 username（后面删缓存要用）
+	oldUser, err := d.GetByUid(uid)
+	if err != nil {
+		return fmt.Errorf("query user failed: %w", err)
+	}
+	if oldUser == nil {
+		return errors.New("user not found, no rows updated")
+	}
+
+	// ② 执行 UPDATE
 	result, err := db.DB.Exec(
 		"UPDATE users SET username = ? WHERE uid = ?",
 		newName, uid,
@@ -229,36 +291,71 @@ func (d *userDAO) UpdateUsername(uid, newName string) error {
 	if err != nil {
 		return fmt.Errorf("update username failed: %w", err)
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if affected, _ := result.RowsAffected(); affected == 0 {
 		return errors.New("user not found, no rows updated")
 	}
+
+	// ③ 删旧缓存 + 预写新缓存（合并一次 DB 查询搞定）
+	rediscache.DelUserCache(
+		rediscache.UserCacheKeyByUid(uid),
+		rediscache.UserCacheKeyByUsername(oldUser.Username),
+	)
+	// 预写新 username 缓存
+	oldUser.Username = newName
+	data, _ := json.Marshal(oldUser)
+	rediscache.SetUserCache(rediscache.UserCacheKeyByUsername(newName), data)
+	rediscache.SetUserCache(rediscache.UserCacheKeyByUid(uid), data)
+
 	return nil
 }
 
 // DeleteById 按主键删
 func (d *userDAO) DeleteById(id int64) error {
-	result, err := db.DB.Exec("DELETE FROM users WHERE id = ?", id)
+	// ① 先查一下拿到缓存 key 需要的值（无缓存时直接查 DB）
+	u, err := d.GetById(id)
+	if err != nil {
+		return fmt.Errorf("query user failed: %w", err)
+	}
+	if u == nil {
+		return errors.New("user not found, no rows deleted")
+	}
+
+	// ② 删 DB + 删缓存（并发安全：删 DB 后立即删缓存，下次读取自然回源）
+	_, err = db.DB.Exec("DELETE FROM users WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete user failed: %w", err)
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		return errors.New("user not found, no rows deleted")
-	}
+
+	// ③ 删缓存
+	rediscache.DelUserCache(
+		rediscache.UserCacheKeyByUid(u.UId),
+		rediscache.UserCacheKeyByUsername(u.Username),
+	)
 	return nil
 }
 
 // DeleteByUid 按业务 UId 删
 func (d *userDAO) DeleteByUid(uid string) error {
-	result, err := db.DB.Exec("DELETE FROM users WHERE uid = ?", uid)
+	// ① 先查一下拿到 username 以删干净缓存
+	u, err := d.GetByUid(uid)
+	if err != nil {
+		return fmt.Errorf("query user failed: %w", err)
+	}
+	if u == nil {
+		return errors.New("user not found, no rows deleted")
+	}
+
+	// ② 删 DB
+	_, err = db.DB.Exec("DELETE FROM users WHERE uid = ?", uid)
 	if err != nil {
 		return fmt.Errorf("delete user failed: %w", err)
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		return errors.New("user not found, no rows deleted")
-	}
+
+	// ③ 删缓存
+	rediscache.DelUserCache(
+		rediscache.UserCacheKeyByUid(uid),
+		rediscache.UserCacheKeyByUsername(u.Username),
+	)
 	return nil
 }
 

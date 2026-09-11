@@ -1,4 +1,0 @@
-time=2026-09-04T14:43:59.923+08:00 level=INFO msg="logger initialized" level=debug format=text output=dual:e:/mssgServer/logs/app.log
-time=2026-09-04T14:43:59.923+08:00 level=INFO msg="server starting" addr=127.0.0.1:8003
-time=2026-09-04T14:44:08.925+08:00 level=INFO msg="client connected" addr=127.0.0.1:51867 total=1
-time=2026-09-04T14:44:08.933+08:00 level=DEBUG msg="recv raw" addr=127.0.0.1:51867 data="{\"seq\":2,\"name\":\"xxx.yyy\",\"msg\":{}}"

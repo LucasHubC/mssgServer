@@ -9,8 +9,9 @@ import (
 )
 
 type Server struct {
-	address string
-	router  *Router
+	address  string
+	router   *Router
+	nodeAddr string // 当前节点的 ws 地址（如 "ws://127.0.0.1:8003"），跨节点 Redis 同步用
 }
 
 func NewServer(addr string) *Server {
@@ -21,6 +22,11 @@ func NewServer(addr string) *Server {
 
 func (s *Server) Router(r *Router) {
 	s.router = r
+}
+
+// SetNodeAddr 设置当前节点的 ws 地址（loginServer 启动时调一次）
+func (s *Server) SetNodeAddr(addr string) {
+	s.nodeAddr = addr
 }
 
 // WebSocket 心跳参数
@@ -68,22 +74,23 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	// ③ 注册到全局连接管理器
 	wsServer := newWsServer(wsConn)
 	wsServer.Router(s.router)
+	wsServer.NodeAddr = s.nodeAddr // 绑定当前节点地址（Redis 跨节点同步用）
 	ConnManager.Register(wsServer)
 
 	// ──── 心跳设置（三要素缺一不可）────
-	// ① PongHandler：收到 Pong 后重置 ReadDeadline
+	// ① PongHandler：收到 Pong 后重置 ReadDeadline（仅读侧，无并发写）
 	wsConn.SetPongHandler(func(appData string) error {
 		wsConn.SetReadDeadline(time.Now().Add(heartbeatTimeout))
 		return nil
 	})
-	// ② PingHandler：兼容客户端主动发 Ping
+	// ② PingHandler：收到客户端 Ping 后回 Pong，必须走 writeMessage 加锁
+	// （此回调在 ReadMessage 协程里触发，与 writeMsgLoop / wsHeartbeat 并发）
 	wsConn.SetPingHandler(func(appData string) error {
-		wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		return wsConn.WriteMessage(websocket.PongMessage, nil)
+		return wsServer.writeMessage(websocket.PongMessage, nil)
 	})
 	// ③ 初始 ReadDeadline + 启动服务器主动发 Ping 的协程
 	wsConn.SetReadDeadline(time.Now().Add(heartbeatTimeout))
-	go wsHeartbeat(wsConn, wsServer.done)
+	go wsHeartbeat(wsServer)
 
 	defer ConnManager.Unregister(wsServer)
 
@@ -100,18 +107,18 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // wsHeartbeat 服务器主动发 Ping 的协程
-// 每隔 heartbeatInterval 发一次 Ping，如果写失败说明连接已死，由 readMsgLoop 那边感知到 ReadDeadline 超时后自然断开
-func wsHeartbeat(wsConn *websocket.Conn, done <-chan struct{}) {
+// 每隔 heartbeatInterval 发一次 Ping，写走 writeMessage 加锁，与 writeMsgLoop / PingHandler 互斥
+// 写失败说明连接已死，由 readMsgLoop 那边感知到 ReadDeadline 超时后自然断开
+func wsHeartbeat(ws *WSServer) {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := wsConn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := ws.writeMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
-		case <-done: // ← readMsgLoop/Close 通知了，马上退
+		case <-ws.done: // ← readMsgLoop/Close 通知了，马上退
 			return
 		}
 	}

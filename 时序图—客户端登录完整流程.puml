@@ -1,0 +1,81 @@
+@startuml
+title 客户端登录完整时序
+
+autonumber "1."
+actor "客户端" as Client
+participant "Gateway\n(:9000)" as GW
+participant "loginServer\n(:8003)" as LS
+participant "Redis" as Redis
+participant "MySQL" as MySQL
+
+== 启动阶段 ==
+LS -> GW: POST /gateway/register\n{type:"login", addr:"ws://...", ...}
+GW --> LS: 200 OK
+
+loop 每 5 秒
+  LS -> GW: POST /gateway/heartbeat\n{online: N}
+  GW -> GW: Touch 刷新心跳时间
+end
+
+== 客户端请求地址 ==
+Client -> GW: GET /gateway/route?type=login&uid=user_001
+GW -> GW: Route()\n过滤存活节点 + PickNode()
+GW --> Client: {"code":0, "addr":"ws://127.0.0.1:8003"}
+
+== WebSocket 连接建立 ==
+Client -> LS: HTTP Upgrade → WebSocket
+LS -> LS: wsHandler()\nRegister 到 ConnManager
+LS -> Redis: SubscribeBroadcast (goroutine)
+LS -> Client: 101 Switching Protocols
+
+== 心跳（后台自动）==
+loop 每 30 秒
+  LS -> Client: Ping
+  Client -> LS: Pong
+  LS -> LS: SetReadDeadline(now+90s)
+end
+
+== 发送登录请求 ==
+Client -> LS: {"name":"account.login", "seq":1, "msg":{"username":"a","password":"b"}}
+LS -> LS: readMsgLoop()\n限流检查 ✅
+LS -> LS: workerPool <- struct{} (抢到 worker)
+
+par 异步执行
+  LS -> LS: Router.Run("account.login")
+  LS -> MySQL: SELECT * FROM users WHERE username=?
+  
+  alt 缓存 miss
+    MySQL --> LS: 返回用户
+    LS -> Redis: SET cache:user:name:a = "{...}"\nSET cache:user:uid:u_001 = "{...}"
+  else 缓存 hit
+    LS -> Redis: GET cache:user:name:a
+    Redis --> LS: 返回缓存 JSON
+    note right: 省一次 DB 查询
+  end
+
+  LS -> LS: 比对密码\nuser.Password != body.Password ✅
+
+  LS -> Redis: SetNX lock:bind:u_001\n(分布式锁)
+  Redis --> LS: OK
+  LS -> Redis: SET online:user:u_001 = "ws://127.0.0.1:8003"
+
+  LS -> LS: ConnManager.BindUid()\n本机 uidMap[u_001] = ws
+  
+  alt 同一 uid 旧连接还在
+    LS -> LS: go old.Close()\n(踢下线)
+    LS -> Redis: PublishBroadcast\n{action:"kick", uid:"u_001"}
+    note right: 其他节点收到后\nClose 本机上的旧连接
+  end
+
+  LS -> LS: safeSend(rsp) → outChan
+end
+
+LS -> Client: {"name":"account.login", "seq":1, "code":0, "msg":{"username":"a","session":"sess_..","uid":"u_001"}}
+
+== 断开连接 ==
+Client -> LS: (断开)
+LS -> LS: readMsgLoop ReadMessage error → break
+LS -> LS: Close() → Unregister()
+LS -> Redis: UnbindUser(u_001)\nDEL online:user:u_001
+
+@enduml

@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"mssgServer/config"
+	"mssgServer/config/db"
 	"mssgServer/infra/log"
+	rediscache "mssgServer/infra/redis"
 	"mssgServer/infra/rpc"
 	"mssgServer/net"
 	"mssgServer/server/login"
@@ -22,18 +24,31 @@ func main() {
 	gatewayURL := config.File.MustValue("gateway", "url", "http://127.0.0.1:9000")
 
 	// ✅ 初始化数据库（失败直接退出）
-	// if err := db.Init(); err != nil {
-	// 	log.Fatal("DB init failed:", err)
-	// }
-	// defer db.Close()
+	if err := db.Init(); err != nil {
+		log.Fatal("DB init failed:", err)
+	}
+	defer db.Close()
+
+	// ✅ 初始化 Redis（可选，失败只 warning，不阻塞启动）
+	nodeAddr := fmt.Sprintf("ws://%s:%s", host, port)
+	if err := db.InitRedis(); err != nil {
+		log.Warn("Redis init failed (multi-node features disabled):", err)
+	} else {
+		defer db.CloseRedis()
+		// 告诉 redis 包"我是谁"，PublishBroadcast 会自动填 FromNode
+		rediscache.SetMyNodeAddr(nodeAddr)
+		// 后台协程：订阅其他节点发来的 Redis 广播
+		go net.ConnManager.SubscribeRemoteBroadcast()
+	}
 
 	s := net.NewServer(host + ":" + port)
+	// 给 Server 设置 NodeAddr，后续每个新连接都会继承这个值
+	s.SetNodeAddr(fmt.Sprintf("ws://%s:%s", host, port))
 	router := net.NewRouter()
 	login.Init(router)
 	s.Router(router)
 
 	// ──── 🆕 向 Gateway 注册 + 定期心跳 ────
-	nodeAddr := fmt.Sprintf("ws://%s:%s", host, port)
 	httpAddr := fmt.Sprintf("http://%s:%s", host, port) // 这里可以和 ws 共用同一端口
 	if err := rpc.Register(gatewayURL, rpc.NodeRegisterReq{
 		Type:     "login",
@@ -100,8 +115,8 @@ func gracefulShutdown(done chan struct{}) {
 	}
 	wg.Wait()
 
-	// ④ 关数据库
-	//db.Close()
+	// ④ 关数据库和 Redis（由 defer 自动关，如果这里手动关确保顺序也可以）
+	// db.Close() 和 db.CloseRedis() 已通过 main() 的 defer 注册
 
 	log.Info("graceful shutdown complete")
 	close(done)

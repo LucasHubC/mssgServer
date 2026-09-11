@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"mssgServer/infra/log"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/time/rate"
@@ -38,6 +40,19 @@ type WSServer struct {
 
 	// once 保证 Close 只执行一次
 	once sync.Once
+
+	// writeMu 保护 wsConn 的写操作（gorilla 要求同一连接同一时刻只有一个 writer）
+	// writeMsgLoop / 心跳 Ping / PingHandler 回 Pong 都要走这把锁
+	writeMu sync.Mutex
+
+	// sendMu 保护 outChan 的发送 + closed 标志，避免向已关闭的 channel 发送导致 panic
+	// Close 必须在持锁状态下置 closed=true 再 close(outChan)
+	sendMu sync.Mutex
+	closed bool
+
+	// NodeAddr 当前节点的 ws 地址（如 "ws://127.0.0.1:8003"）
+	// 由 Server.wsHandler 赋值，Redis 跨节点在线状态同步用
+	NodeAddr string
 }
 
 func newWsServer(wsConn *websocket.Conn) *WSServer {
@@ -80,21 +95,45 @@ func (s *WSServer) Addr() string {
 	return s.wsConn.RemoteAddr().String()
 }
 
-// Push 向本连接推送消息（非阻塞，outChan 满时丢弃并记日志）
+// writeMessage 加锁后写 WebSocket，避免 writeMsgLoop / 心跳 / PingHandler 并发写冲突
+// gorilla/websocket 要求：同一连接同一时刻只能有一个 writer，SetWriteDeadline 也要在同把锁内
+func (s *WSServer) writeMessage(msgType int, data []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_ = s.wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return s.wsConn.WriteMessage(msgType, data)
+}
+
+// safeSend 向 outChan 投递消息，连接已关闭或通道满时返回 false（绝不 panic）
+// sendMu 与 Close 互斥，保证不会向已关闭的 channel 发送
+func (s *WSServer) safeSend(msg *WsMsgResp) bool {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	if s.closed {
+		return false
+	}
+	select {
+	case s.outChan <- msg:
+		return true
+	default:
+		log.Warn("outChan full, drop message", "addr", s.Addr())
+		return false
+	}
+}
+
+// Push 向本连接推送消息（非阻塞，outChan 满或连接已关时丢弃并记日志）
 func (s *WSServer) Push(name string, data interface{}) {
+	seq := atomic.AddInt64(&s.Seq, 1) // 🔴 并发安全的序列号
 	rsp := &WsMsgResp{
 		Body: &RespBody{
-			Seq:  s.Seq,
+			Seq:  seq,
 			Name: name,
 			Code: 0,
 			Msg:  data,
 		},
 	}
-
-	select {
-	case s.outChan <- rsp:
-	default:
-		log.Warn("Push: outChan full, drop message", "addr", s.Addr(), "name", name)
+	if !s.safeSend(rsp) {
+		log.Warn("Push: outChan full or closed, drop message", "addr", s.Addr(), "name", name)
 	}
 }
 
@@ -111,7 +150,7 @@ func (s *WSServer) writeMsgLoop() {
 			log.Error("marshal response failed", "err", err)
 			continue
 		}
-		if err := s.wsConn.WriteMessage(websocket.TextMessage, data); err != nil {
+		if err := s.writeMessage(websocket.TextMessage, data); err != nil {
 			log.Error("write message failed", "addr", s.Addr(), "err", err)
 			return
 		}
@@ -166,18 +205,16 @@ func (s *WSServer) readMsgLoop() {
 					}
 				}()
 				s.router.Run(req, rsp)
-				// Push 失败不影响主流程（outChan 满了跳过，见 Broadcast 的处理）
-				select {
-				case s.outChan <- rsp:
-				default:
-					log.Warn("outChan full, drop response", "addr", s.Addr(), "name", body.Name)
+				// 响应通过 safeSend 投递，连接已关或 outChan 满时安全跳过
+				if !s.safeSend(rsp) {
+					log.Warn("outChan full or closed, drop response", "addr", s.Addr(), "name", body.Name)
 				}
 			}()
 		default:
 			// worker pool 满了，降级为同步执行（极端保护）
 			log.Warn("worker pool full, fallback to sync", "addr", s.Addr())
 			s.router.Run(req, rsp)
-			s.outChan <- rsp
+			s.safeSend(rsp)
 		}
 	}
 
@@ -185,10 +222,15 @@ func (s *WSServer) readMsgLoop() {
 }
 
 // Close 关闭连接，幂等（sync.Once 保证只执行一次）
-// 关闭顺序：先 close outChan（让 writeMsgLoop 退出），再关 wsConn
+// 关闭顺序：先在 sendMu 锁内置 closed=true 并 close(outChan)（让 writeMsgLoop 退出，
+// 同时阻止后续 safeSend），再关 wsConn，再关 done 通知 wsHandler
 func (s *WSServer) Close() {
 	s.once.Do(func() {
+		s.sendMu.Lock()
+		s.closed = true
 		close(s.outChan)
+		s.sendMu.Unlock()
+
 		s.wsConn.Close()
 		close(s.done)
 	})

@@ -1,0 +1,218 @@
+@startuml
+title mssgServer 框架类图
+
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+
+package "net 传输层" {
+  class Server {
+    - address: string
+    - router: *Router
+    - nodeAddr: string
+    + NewServer(addr) *Server
+    + Router(r)
+    + SetNodeAddr(addr)
+    + Start()
+    - wsHandler(w, r)
+  }
+
+  class WSServer {
+    - wsConn: *websocket.Conn
+    - router: *Router
+    - outChan: chan *WsMsgResp
+    - Seq: int64
+    - property: map[string]interface{}
+    - propertyLock: RWMutex
+    - limiter: *rate.Limiter
+    - done: chan struct{}
+    - once: sync.Once
+    - writeMu: Mutex
+    - sendMu: Mutex
+    - closed: bool
+    + NodeAddr: string
+    + SetProperty(k, v)
+    + GetProperty(k) (interface{}, error)
+    + Addr() string
+    + Push(name, data)
+    + Start()
+    + Close()
+    + WaitClose()
+    - readMsgLoop()
+    - writeMsgLoop()
+    - writeMessage()
+    - safeSend()
+  }
+
+  class ConnManager {
+    - mu: RWMutex
+    - conns: map[*WSServer]struct{}
+    - uidMap: map[string]*WSServer
+    - total: int64
+    - maxConns: int64
+    + Register(ws) bool
+    + Unregister(ws)
+    + BindUid(uid, ws)
+    + GetByUid(uid) *WSServer
+    + Broadcast(name, data)
+    + KickByUid(uid)
+    + Total() int64
+    + All() []*WSServer
+    + SubscribeRemoteBroadcast()
+  }
+
+  class Router {
+    - groups: map[string]*group
+    + NewRouter()
+    + Group(prefix) *group
+    + Run(req, rsp)
+  }
+
+  class group {
+    - prefix: string
+    - handlerMap: map[string]HandlerFunc
+    + AddRoute(name, handler)
+  }
+
+  interface WSConn {
+    + Addr() string
+    + SetProperty(k, v)
+    + GetProperty(k)
+  }
+
+  WSServer ..|> WSConn
+  Server --> Router
+  Server "1" o-- "*" WSServer
+  Router --> group
+  ConnManager o-- WSServer
+
+  note right of Server
+    HTTP Server + WebSocket 升级
+    心跳三要素 + done channel
+  end note
+
+  note right of WSServer
+    每连接 2 goroutine:
+    readMsgLoop → worker pool
+    writeMsgLoop → outChan
+  end note
+
+  note right of ConnManager
+    单例全局连接管理器
+    + Redis 跨节点同步
+  end note
+}
+
+package "gateway 网关层" {
+  class Gateway {
+    - mu: RWMutex
+    - nodes: map[string][]*Node
+    - policy: RoutePolicy
+    + Register(req) error
+    + Heartbeat(req) error
+    + Route(req) *RouteResp
+    + CleanupLoop()
+    - HandleRegister()
+    - HandleHeartbeat()
+    - HandleRoute()
+    - HandleStatus()
+  }
+
+  class Node {
+    - Type: string
+    - Addr: string
+    - HTTPAddr: string
+    - MaxConns: int64
+    - Online: int64
+    - lastHeartbeat: time.Time
+    + IsAlive() bool
+    + Touch(online)
+  }
+
+  Gateway o-- Node
+}
+
+package "infra 基础设施" {
+  package "infra/redis" {
+    class RedisCache {
+      .. 静态方法 ..
+      + BindUser(uid, nodeAddr) bool
+      + UnbindUser(uid)
+      + GetUserNode(uid) (string, bool)
+      + PublishBroadcast(msg)
+      + SubscribeBroadcast(handler)
+      + GetUserCache(key) ([]byte, bool)
+      + SetUserCache(key, data)
+      + DelUserCache(keys...)
+      + TryLock(key, ttl) (func(), bool)
+    }
+  }
+
+  package "infra/rpc" {
+    class RpcClient {
+      .. 静态方法 ..
+      + Register(gwURL, req) error
+      + Heartbeat(gwURL, req)
+    }
+  }
+
+  package "infra/log" {
+    class Logger {
+      + Init()
+      + Info(msg, args...)
+      + Warn(msg, args...)
+      + Error(msg, args...)
+      + Debug(msg, args...)
+    }
+  }
+}
+
+package "config 配置层" {
+  class DB {
+    + DB: *sql.DB
+    + RDB: *redis.Client
+    + Init() error
+    + Close()
+    + InitRedis() error
+    + CloseRedis()
+  }
+}
+
+package "server/login 业务层" {
+  class Account {
+    + Router(r *Router)
+    + login(req, rsp)
+  }
+
+  class UserDAO {
+    + GetByUsername(username) (*User, error)
+    + GetByUid(uid) (*User, error)
+    + UpdatePassword(uid, pwd) error
+    + UpdateUsername(uid, name) error
+    + DeleteById(id) error
+    + DeleteByUid(uid) error
+  }
+
+  class User {
+    + Id: int64
+    + UId: string
+    + Username: string
+    + Password: string
+  }
+
+  Account --> UserDAO
+  UserDAO --> User
+}
+
+' ──── 跨包依赖 ────
+Server --> Config : 读取配置
+WSServer --> Logger
+ConnManager --> RedisCache : 跨节点同步
+ConnManager --> Logger
+UserDAO --> DB
+UserDAO --> RedisCache
+Account --> Logger
+Gateway --> Logger
+Gateway --> RpcClient : HTTP handler 用类型
+Server ..> RpcClient : 启动时注册/心跳
+
+@enduml

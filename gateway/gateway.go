@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"mssgServer/infra/log"
+	rediscache "mssgServer/infra/redis"
 	"mssgServer/infra/rpc"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,18 +28,27 @@ func NewGateway(policy RoutePolicy) *Gateway {
 
 // Register 后端节点注册
 func (g *Gateway) Register(req rpc.NodeRegisterReq) error {
+
+	// 参数校验：防止非法 key 污染 map
+	if req.Type == "" || req.Addr == "" {
+		return fmt.Errorf("invalid register params: type and addr are required")
+	}
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	// 同 addr 重复注册 → 更新（先删掉旧的再加）
 	nodes := g.nodes[req.Type]
-	for i, n := range nodes {
+	// 找：同 addr 已存在 → 原地更新元信息，保留 score 让轮询公平性不丢失
+	for _, n := range nodes {
 		if n.Addr == req.Addr {
-			nodes = append(nodes[:i], nodes[i+1:]...)
-			break
+			n.HTTPAddr = req.HTTPAddr
+			n.MaxConns = req.MaxConns
+			atomic.StoreInt64(&n.Online, 0)
+			n.Touch(0) // 重置心跳时间，让 CleanupLoop 不会误判
+			log.Info("[Gateway] node re-registered (updated)", "type", req.Type, "addr", req.Addr)
+			return nil
 		}
 	}
-
 	node := &Node{
 		Type:          req.Type,
 		Addr:          req.Addr,
@@ -48,17 +59,18 @@ func (g *Gateway) Register(req rpc.NodeRegisterReq) error {
 	}
 	g.nodes[req.Type] = append(nodes, node)
 
-	log.Info("[Gateway] node registered", "type", req.Type, "addr", req.Addr)
+	log.Info("[Gateway] node registered (new)", "type", req.Type, "addr", req.Addr)
 	return nil
 }
 
 // Heartbeat 后端节点上报心跳
 func (g *Gateway) Heartbeat(req rpc.NodeHeartbeatReq) error {
+	// 全程持读锁遍历，避免 CleanupLoop 并发清理导致 slice 变了
+	// Heartbeat 内部只调用 n.Touch（自己有加锁），不会阻塞读
 	g.mu.RLock()
-	nodes := g.nodes[req.Type]
-	g.mu.RUnlock()
+	defer g.mu.RUnlock()
 
-	for _, n := range nodes {
+	for _, n := range g.nodes[req.Type] {
 		if n.Addr == req.Addr {
 			n.Touch(req.Online)
 			return nil
@@ -163,4 +175,108 @@ func (g *Gateway) HandleRoute(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, g.Status())
+}
+
+// ──── 管理接口（可选，给运营后台用）────
+
+// AdminBroadcastReq 全服广播请求
+type AdminBroadcastReq struct {
+	Name string      `json:"name"` // 消息名，如 "system.notice"
+	Data interface{} `json:"data"` // 消息体
+}
+
+// AdminPushReq 跨服推指定 uid
+type AdminPushReq struct {
+	UID  string      `json:"uid"`
+	Name string      `json:"name"`
+	Data interface{} `json:"data"`
+}
+
+// AdminKickReq 跨服踢人
+type AdminKickReq struct {
+	UID string `json:"uid"`
+}
+
+// HandleAdminBroadcast POST /admin/broadcast
+// 通过 Redis Pub/Sub 向所有后端节点广播
+func (g *Gateway) HandleAdminBroadcast(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req AdminBroadcastReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+
+	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
+		Action: "broadcast",
+		Name:   req.Name,
+		Data:   req.Data,
+	})
+
+	log.Info("[Gateway] admin broadcast", "name", req.Name)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "msg": "ok"})
+}
+
+// HandleAdminPush POST /admin/push
+// 跨服推消息给指定 uid
+func (g *Gateway) HandleAdminPush(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req AdminPushReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.UID == "" || req.Name == "" {
+		http.Error(w, "uid and name are required", http.StatusBadRequest)
+		return
+	}
+
+	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
+		Action: "push",
+		UID:    req.UID,
+		Name:   req.Name,
+		Data:   req.Data,
+	})
+
+	log.Info("[Gateway] admin push", "uid", req.UID, "name", req.Name)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "msg": "ok"})
+}
+
+// HandleAdminKick POST /admin/kick
+// 跨服踢某个 uid 下线
+func (g *Gateway) HandleAdminKick(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req AdminKickReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.UID == "" {
+		http.Error(w, "uid is required", http.StatusBadRequest)
+		return
+	}
+
+	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
+		Action: "kick",
+		UID:    req.UID,
+	})
+
+	log.Info("[Gateway] admin kick", "uid", req.UID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "msg": "ok"})
 }
