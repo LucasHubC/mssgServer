@@ -9,6 +9,7 @@ import (
 	"mssgServer/infra/rpc"
 	"mssgServer/net"
 	"mssgServer/server/chat"
+	"mssgServer/server/login"
 	"os"
 	"os/signal"
 	"sync"
@@ -38,6 +39,7 @@ func main() {
 
 	router := net.NewRouter()
 	chat.Init(router)
+	login.Init(router)
 	s.Router(router)
 
 	// 向 Gateway 注册，类型 "chat"
