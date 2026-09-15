@@ -8,6 +8,8 @@ package redis
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"mssgServer/config/db"
 	"mssgServer/infra/log"
@@ -261,6 +263,77 @@ func GetGroupMembers(groupId string) []string {
 		return nil
 	}
 	return members
+}
+
+// ────────────────────────────────────────
+//  Session / Token 存储（HTTP 短连接用）
+//
+//  设计：
+//   - 登录成功时生成 token = "tk_" + 32位hex
+//   - Redis key: sess:{token} → {uid, username} (JSON)
+//   - 默认过期 2 小时，防止 token 无限堆积
+//   - 跨服务可用：apiLoginServer 签发的 token，wsLoginServer 也能查
+// ────────────────────────────────────────
+
+const (
+	sessionTTL = 2 * time.Hour
+)
+
+// Session 会话信息（存在 Redis 里的内容）
+type Session struct {
+	UId      string `json:"uid"`
+	Username string `json:"username"`
+}
+
+// StoreSession 签发 token，存到 Redis
+// 返回生成的 token（形如 "tk_a1b2c3..."）
+func StoreSession(sess Session) (token string, err error) {
+	// 生成 32 位随机 hex + 前缀
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	token = "tk_" + hex.EncodeToString(b)
+
+	if db.RDB == nil {
+		// 没 Redis 时安全降级：token 照样生成，但不持久化
+		// 这种场景下 Token 校验会直接失败（单节点无 Redis 不支持 HTTP Token）
+		log.Warn("StoreSession: Redis not initialized, token will NOT be valid")
+		return token, nil
+	}
+
+	data, _ := json.Marshal(sess)
+	key := "sess:" + token
+	if err := db.RDB.Set(ctx, key, data, sessionTTL).Err(); err != nil {
+		log.Warn("StoreSession redis Set failed", "err", err)
+		return "", err
+	}
+	return token, nil
+}
+
+// GetSession 用 token 查会话
+// 返回 (Session, true) 表示找到；(nil, false) 表示 token 无效/过期
+func GetSession(token string) (Session, bool) {
+	if db.RDB == nil || token == "" {
+		return Session{}, false
+	}
+	data, err := db.RDB.Get(ctx, "sess:"+token).Bytes()
+	if err != nil {
+		return Session{}, false
+	}
+	var sess Session
+	if err := json.Unmarshal(data, &sess); err != nil {
+		return Session{}, false
+	}
+	return sess, true
+}
+
+// DelSession 注销 token（登出时调用）
+func DelSession(token string) {
+	if db.RDB == nil || token == "" {
+		return
+	}
+	db.RDB.Del(ctx, "sess:"+token)
 }
 
 // IsGroupMember 判断 uid 是否在群组里
