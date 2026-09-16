@@ -1,6 +1,7 @@
 package net
 
 import (
+	"mssgServer/config"
 	"mssgServer/infra/log"
 	rediscache "mssgServer/infra/redis"
 	"sync"
@@ -17,8 +18,9 @@ type ConnectionManager struct {
 	maxConns int64                  // 最大允许连接数
 }
 
-// ConnManager 全局单例，默认最多 20000 连接
-var ConnManager = NewConnectionManager(20000)
+// ConnManager 全局单例，最大连接数从 config.ini [ws_server] max_conns 读取
+// 默认 20000，阿里云 8核16G 可提至 50000
+var ConnManager = NewConnectionManager(int64(config.File.MustInt("ws_server", "max_conns", 20000)))
 
 func NewConnectionManager(maxConns int64) *ConnectionManager {
 	return &ConnectionManager{
@@ -51,12 +53,13 @@ func (cm *ConnectionManager) Register(ws *WSServer) bool {
 func (cm *ConnectionManager) Unregister(ws *WSServer) {
 	cm.mu.Lock()
 	delete(cm.conns, ws)
-	uid, _ := ws.GetProperty("uid")
-	if uid != nil {
-		if cur, ok := cm.uidMap[uid.(string)]; ok && cur == ws {
-			delete(cm.uidMap, uid.(string))
-			// 清理 Redis 在线状态
-			rediscache.UnbindUser(uid.(string))
+	uidVal, _ := ws.GetProperty("uid")
+	if uidStr, ok := uidVal.(string); ok && uidStr != "" {
+		if cur, exists := cm.uidMap[uidStr]; exists && cur == ws {
+			delete(cm.uidMap, uidStr)
+			cm.mu.Unlock()
+			rediscache.UnbindUser(uidStr)
+			cm.mu.Lock()
 		}
 	}
 	cm.mu.Unlock()
@@ -77,7 +80,7 @@ func (cm *ConnectionManager) BindUid(uid string, ws *WSServer) {
 	// ② 拿分布式锁 + 写入新的在线位置
 	if ws.NodeAddr != "" {
 		if !rediscache.BindUser(uid, ws.NodeAddr) {
-			log.Warn("BindUid rejected by redis lock, uid=", uid)
+			log.Warn("BindUid rejected by redis lock", "uid", uid)
 			return
 		}
 	}
@@ -181,6 +184,18 @@ func (cm *ConnectionManager) All() []*WSServer {
 		list = append(list, ws)
 	}
 	return list
+}
+
+// OnlineUids 当前已登录用户的 uid 列表
+// 比 All() 后遍历 GetProperty 高效得多（直接读 uidMap）
+func (cm *ConnectionManager) OnlineUids() []string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	uids := make([]string, 0, len(cm.uidMap))
+	for uid := range cm.uidMap {
+		uids = append(uids, uid)
+	}
+	return uids
 }
 
 // SubscribeRemoteBroadcast 后台协程：订阅 Redis 广播频道，处理其他节点发来的消息

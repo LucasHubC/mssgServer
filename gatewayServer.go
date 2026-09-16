@@ -19,7 +19,7 @@ func main() {
 
 	// Gateway 不需要 MySQL，但需要 Redis（用于广播消息转发）
 	if err := db.InitRedis(); err != nil {
-		log.Warn("[Gateway] redis init failed (admin broadcast disabled):", err)
+		log.Warn("[Gateway] redis init failed (admin broadcast disabled)", "err", err)
 	} else {
 		defer db.CloseRedis()
 		// Gateway 自己也会发广播，设个特殊 nodeAddr 用来跳过自己
@@ -46,6 +46,6 @@ func main() {
 	log.Info("[Gateway] starting on", addr, "policy=", policy)
 	log.Info("[Gateway] admin APIs: /admin/broadcast, /admin/push, /admin/kick")
 	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatal("[Gateway] listen failed:", err)
+		log.Fatal("[Gateway] listen failed", "err", err)
 	}
 }

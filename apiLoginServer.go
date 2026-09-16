@@ -6,10 +6,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"mssgServer/config"
 	"mssgServer/config/db"
 	"mssgServer/infra/log"
+	"mssgServer/server/inventory"
 	"mssgServer/server/login/controller"
 	"net/http"
 	"os"
@@ -24,49 +24,48 @@ func main() {
 	host := config.File.MustValue("api_server", "host", "127.0.0.1")
 	port := config.File.MustValue("api_server", "port", "8005")
 
-	// ✅ HTTP API 不需要 Redis 广播，但注册/登录走 DAO 需要 MySQL
 	if err := db.Init(); err != nil {
-		log.Fatal("DB init failed:", err)
+		log.Fatal("DB init failed", "err", err)
 	}
 	defer db.Close()
 
-	// Redis 可选（DAO 层有 Redis 缓存更快）
 	if err := db.InitRedis(); err != nil {
-		log.Warn("Redis init failed (cache disabled):", err)
+		log.Warn("Redis init failed (cache disabled)", "err", err)
 	} else {
 		defer db.CloseRedis()
 	}
 
-	// 组装路由（纯标准库，零抽象层）
 	mux := http.NewServeMux()
 	controller.DefaultAccount.RegisterHttpRoutes(mux)
+	inventory.InitHttp(mux)
+	inventory.StartAutoSave() // HTTP 进程也要启动定时落盘
 
-	// HTTP Server —— 参数和 WebSocket Server 完全不同
 	srv := &http.Server{
 		Addr:         host + ":" + port,
 		Handler:      mux,
-		ReadTimeout:  10 * time.Second, // 短连接：读请求超时严格
-		WriteTimeout: 10 * time.Second, // 短连接：写响应超时严格
-		IdleTimeout:  30 * time.Second, // 空闲连接回收
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  30 * time.Second,
 	}
 
-	// 优雅关闭（HTTP 的优雅关闭很简单——停止接新请求，等正在处理的完成）
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		<-sigCh
 
 		log.Info("apiLoginServer shutting down...")
+		inventory.Shutdown() // 强制保存 Redis 中脏背包到 MySQL
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
-		fmt.Println("👋 apiLoginServer bye~")
+		log.Info("apiLoginServer bye~")
 	}()
 
-	log.Info("[apiLoginServer] starting on", host+":"+port)
-	log.Info("[apiLoginServer] routes: POST /api/login, POST /api/register, GET /api/user/{uid}")
+	log.Info("[apiLoginServer] starting", "addr", host+":"+port)
+	log.Info("[apiLoginServer] HTTP routes: /api/login, /api/register, /api/user/{uid}, /api/me, /api/logout")
+	log.Info("[apiLoginServer] inventory routes: /api/inventory/add|consume|get")
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal("apiLoginServer listen failed:", err)
+		log.Fatal("apiLoginServer listen failed", "err", err)
 	}
 }

@@ -242,10 +242,41 @@ function startRepl() {
                 send(ws, 'chat.online.get', {});
                 break;
 
+            // ──── 道具模块 ────
+            case 'additem':
+            case 'add':
+                if (!currentUId) { console.log('❌ 请先 login'); break; }
+                if (args.length < 2) { console.log('用法: additem <itemId> <count>'); break; }
+                send(ws, 'inventory.add', { itemId: args[0], count: parseInt(args[1], 10) || 1 });
+                break;
+
+            case 'consume':
+            case 'useitem':
+                if (!currentUId) { console.log('❌ 请先 login'); break; }
+                if (args.length < 2) { console.log('用法: consume <itemId> <count>'); break; }
+                send(ws, 'inventory.consume', { itemId: args[0], count: parseInt(args[1], 10) || 1 });
+                break;
+
+            case 'dropitem':
+            case 'drop':
+                if (!currentUId) { console.log('❌ 请先 login'); break; }
+                if (args.length < 2) { console.log('用法: dropitem <itemId> <count>'); break; }
+                send(ws, 'inventory.drop', { itemId: args[0], count: parseInt(args[1], 10) || 1 });
+                break;
+
+            case 'inventory':
+            case 'bag':
+            case 'items':
+                if (!currentUId) { console.log('❌ 请先 login'); break; }
+                send(ws, 'inventory.get', {});
+                break;
+
             default:
+                // 尝试把剩余参数当 JSON 解析（通用兜底，比如直接发 {"itemId":"xxx","count":1}）
                 try {
                     const jsonPart = input.slice(cmd.length).trim();
-                    const msg = jsonPart ? JSON.parse(jsonPart) : {};
+                    if (!jsonPart) { console.log('❌ 未知命令，输入 help 查看帮助'); break; }
+                    const msg = JSON.parse(jsonPart);
                     send(ws, cmd, msg);
                 } catch (e) {
                     console.log('❌ 未知命令，输入 help 查看帮助');

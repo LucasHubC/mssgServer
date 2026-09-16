@@ -27,7 +27,7 @@ func main() {
 
 	// ✅ Redis 是必须的（跨服 Pub/Sub + 群组）
 	if err := db.InitRedis(); err != nil {
-		log.Fatal("Redis init failed (chat server requires Redis):", err)
+		log.Fatal("Redis init failed (chat server requires Redis)", "err", err)
 	}
 	defer db.CloseRedis()
 
@@ -50,7 +50,7 @@ func main() {
 		HTTPAddr: httpAddr,
 		MaxConns: net.ConnManager.MaxConns(),
 	}); err != nil {
-		log.Warn("register to gateway failed (is gateway running?):", err)
+		log.Warn("register to gateway failed (is gateway running?)", "err", err)
 	}
 
 	// 心跳协程
@@ -89,7 +89,7 @@ func gracefulShutdown(done chan struct{}) {
 	})
 	time.Sleep(300 * time.Millisecond)
 
-	log.Info("[ChatServer] closing all connections, total=", net.ConnManager.Total())
+	log.Info("[ChatServer] closing all connections", "total", net.ConnManager.Total())
 	all := net.ConnManager.All()
 	var wg sync.WaitGroup
 	for _, ws := range all {

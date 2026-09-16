@@ -7,6 +7,7 @@ import (
 	"mssgServer/infra/log"
 	rediscache "mssgServer/infra/redis"
 	"mssgServer/net"
+	invDAO "mssgServer/server/inventory/dao"
 	"mssgServer/server/login/dao"
 	"mssgServer/server/login/proto"
 	"net/http"
@@ -48,7 +49,7 @@ func (a *Account) login(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 
 	// 解析请求参数
 	body := &proto.LoginReq{}
-	if err := parseMsg(req.Body.Msg, body); err != nil {
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
@@ -84,6 +85,15 @@ func (a *Account) login(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		net.ConnManager.BindUid(user.UId, ws)
 	}
 
+	// ✅ 登录成功：从 MySQL 加载背包进 Redis（防止 Redis 重启导致道具丢失）
+	if items, err := invDAO.ItemDAO.LoadByUid(user.UId); err != nil {
+		log.Warn("load inventory on login failed", "uid", user.UId, "err", err)
+	} else if err := rediscache.LoadInventory(user.UId, items); err != nil {
+		log.Warn("load inventory to redis failed", "uid", user.UId, "err", err)
+	} else if len(items) > 0 {
+		log.Info("inventory loaded on login", "uid", user.UId, "items", len(items))
+	}
+
 	rsp.Body.Msg = &proto.LoginResp{
 		Username: user.Username,
 		Session:  "sess_" + user.UId,
@@ -94,13 +104,12 @@ func (a *Account) login(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 // register 用户注册
 func (a *Account) register(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	body := &proto.RegisterReq{}
-	if err := parseMsg(req.Body.Msg, body); err != nil {
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
 
-	// ① 参数校验
 	body.Username = strings.TrimSpace(body.Username)
 	body.Password = strings.TrimSpace(body.Password)
 	if body.Username == "" || body.Password == "" {
@@ -169,26 +178,22 @@ func (a *Account) loginHttp(w http.ResponseWriter, r *http.Request) {
 
 	body := &proto.LoginReq{}
 	if err := json.NewDecoder(r.Body).Decode(body); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "参数解析失败"})
+		net.WriteBadRequest(w, "参数解析失败")
 		return
 	}
 
 	user, err := dao.UserDAO.GetByUsername(body.Username)
 	if err != nil {
 		log.Error("loginHttp db error", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "数据库错误"})
+		net.WriteError(w, "数据库错误")
 		return
 	}
 	if user == nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "用户不存在"})
+		net.WriteNotFound(w, "用户不存在")
 		return
 	}
 	if user.Password != body.Password {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "密码错误"})
+		net.WriteUnauthorized(w, "密码错误")
 		return
 	}
 
@@ -199,15 +204,20 @@ func (a *Account) loginHttp(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Error("loginHttp StoreSession failed", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "签发登录凭证失败"})
+		net.WriteError(w, "签发登录凭证失败")
 		return
 	}
 
 	log.Info("user login (http)", "uid", user.UId, "username", user.Username)
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{
+	// ✅ HTTP 登录也加载背包进 Redis（同上）
+	if items, err := invDAO.ItemDAO.LoadByUid(user.UId); err != nil {
+		log.Warn("load inventory on http login failed", "uid", user.UId, "err", err)
+	} else if err := rediscache.LoadInventory(user.UId, items); err != nil {
+		log.Warn("load inventory to redis failed (http)", "uid", user.UId, "err", err)
+	}
+
+	net.WriteJSON(w, map[string]any{
 		"code": 0,
 		"data": map[string]any{
 			"token":    token,
@@ -226,39 +236,33 @@ func (a *Account) registerHttp(w http.ResponseWriter, r *http.Request) {
 
 	body := &proto.RegisterReq{}
 	if err := json.NewDecoder(r.Body).Decode(body); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "参数解析失败"})
+		net.WriteBadRequest(w, "参数解析失败")
 		return
 	}
 
 	body.Username = strings.TrimSpace(body.Username)
 	body.Password = strings.TrimSpace(body.Password)
 	if body.Username == "" || body.Password == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "用户名和密码不能为空"})
+		net.WriteBadRequest(w, "用户名和密码不能为空")
 		return
 	}
 	if len(body.Username) < 3 || len(body.Username) > 32 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "用户名长度 3-32 位"})
+		net.WriteBadRequest(w, "用户名长度 3-32 位")
 		return
 	}
 	if len(body.Password) < 6 || len(body.Password) > 128 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "密码长度 6-128 位"})
+		net.WriteBadRequest(w, "密码长度 6-128 位")
 		return
 	}
 
 	exists, err := dao.UserDAO.ExistsByUsername(body.Username)
 	if err != nil {
 		log.Error("registerHttp check failed", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "服务器错误"})
+		net.WriteError(w, "服务器错误")
 		return
 	}
 	if exists {
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "用户名已存在"})
+		net.WriteConflict(w, "用户名已存在")
 		return
 	}
 
@@ -269,14 +273,12 @@ func (a *Account) registerHttp(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := dao.UserDAO.Create(u); err != nil {
 		log.Error("registerHttp create failed", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "注册失败"})
+		net.WriteError(w, "注册失败")
 		return
 	}
 
 	log.Info("user registered (http)", "uid", u.UId, "username", u.Username)
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{
+	net.WriteJSON(w, map[string]any{
 		"code": 0,
 		"data": proto.RegisterResp{
 			Username: u.Username,
@@ -296,27 +298,23 @@ func (a *Account) userInfoHttp(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
 	uid := parts[len(parts)-1]
 	if uid == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "uid 缺失"})
+		net.WriteBadRequest(w, "uid 缺失")
 		return
 	}
 
 	user, err := dao.UserDAO.GetByUid(uid)
 	if err != nil {
 		log.Error("userInfoHttp db error", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "数据库错误"})
+		net.WriteError(w, "数据库错误")
 		return
 	}
 	if user == nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": "用户不存在"})
+		net.WriteNotFound(w, "用户不存在")
 		return
 	}
 
 	// ✅ HTTP API 绝对不能返回密码！
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{
+	net.WriteJSON(w, map[string]any{
 		"code": 0,
 		"data": map[string]string{
 			"uid":      user.UId,
@@ -327,34 +325,6 @@ func (a *Account) userInfoHttp(w http.ResponseWriter, r *http.Request) {
 
 // ──── 鉴权辅助 ────
 
-// authFromHeader 从 Authorization header 提取 token
-// 支持两种格式：
-//
-//	Authorization: Bearer tk_abc123...
-//	Authorization: tk_abc123...
-//
-// 返回 (Session, true) 表示通过；(nil, false) 表示失败
-func authFromHeader(r *http.Request) (rediscache.Session, bool) {
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		return rediscache.Session{}, false
-	}
-	// 去掉 "Bearer " 前缀
-	if strings.HasPrefix(auth, "Bearer ") {
-		auth = strings.TrimPrefix(auth, "Bearer ")
-	}
-	if auth == "" {
-		return rediscache.Session{}, false
-	}
-	return rediscache.GetSession(auth)
-}
-
-// writeUnauthorized 统一写 401 响应
-func writeUnauthorized(w http.ResponseWriter, msg string) {
-	w.WriteHeader(http.StatusUnauthorized)
-	json.NewEncoder(w).Encode(map[string]any{"code": -1, "errMsg": msg})
-}
-
 // ──── 需要鉴权的 HTTP Handlers ────
 
 // meHttp GET /api/me —— 获取当前登录用户信息（必须带 token）
@@ -364,14 +334,13 @@ func (a *Account) meHttp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, ok := authFromHeader(r)
+	sess, ok := net.AuthFromHeader(r)
 	if !ok {
-		writeUnauthorized(w, "token 无效或已过期")
+		net.WriteUnauthorized(w, "token 无效或已过期")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{
+	net.WriteJSON(w, map[string]any{
 		"code": 0,
 		"data": map[string]string{
 			"uid":      sess.UId,
@@ -388,19 +357,14 @@ func (a *Account) logoutHttp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 从 Authorization 提取 token
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		auth = strings.TrimPrefix(auth, "Bearer ")
-	}
-	if auth == "" {
-		writeUnauthorized(w, "请先登录")
+	sess, ok := net.AuthFromHeader(r)
+	if !ok {
+		net.WriteUnauthorized(w, "请先登录")
 		return
 	}
 
-	rediscache.DelSession(auth)
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "ok"})
+	rediscache.DelSession(sess.Token)
+	net.WriteJSON(w, map[string]any{"code": 0, "msg": "ok"})
 }
 
 // genUId 生成业务 UId: test_ + 12 位 hex = 16 字符
@@ -408,13 +372,4 @@ func genUId() string {
 	b := make([]byte, 6)
 	rand.Read(b)
 	return "test_" + hex.EncodeToString(b)
-}
-
-// parseMsg 把 ReqBody.Msg (interface{}) 反序列化到具体结构体
-func parseMsg(raw interface{}, target interface{}) error {
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, target)
 }

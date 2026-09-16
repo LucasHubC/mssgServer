@@ -3,7 +3,6 @@ package controller
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"mssgServer/infra/log"
 	rediscache "mssgServer/infra/redis"
 	"mssgServer/net"
@@ -35,13 +34,13 @@ func (c *Chat) Router(r *net.Router) {
 // ────────────────────────────────────────
 func (c *Chat) sendWorld(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	body := &proto.SendWorldReq{}
-	if err := parseMsg(req.Body.Msg, body); err != nil {
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
 
-	uid, username := getUidAndName(req.Conn)
+	uid, username := net.GetAuthInfo(req.Conn)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -77,13 +76,13 @@ func (c *Chat) sendWorld(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 // ────────────────────────────────────────
 func (c *Chat) sendPrivate(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	body := &proto.SendPrivateReq{}
-	if err := parseMsg(req.Body.Msg, body); err != nil {
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
 
-	uid, username := getUidAndName(req.Conn)
+	uid, username := net.GetAuthInfo(req.Conn)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -128,13 +127,13 @@ func (c *Chat) sendPrivate(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 // ────────────────────────────────────────
 func (c *Chat) sendGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	body := &proto.SendGroupReq{}
-	if err := parseMsg(req.Body.Msg, body); err != nil {
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
 
-	uid, username := getUidAndName(req.Conn)
+	uid, username := net.GetAuthInfo(req.Conn)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -191,12 +190,12 @@ func (c *Chat) sendGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 // ────────────────────────────────────────
 func (c *Chat) joinGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	body := &proto.GroupMemberReq{}
-	if err := parseMsg(req.Body.Msg, body); err != nil {
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	uid, _ := getUidAndName(req.Conn)
+	uid := net.GetUid(req.Conn)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -222,12 +221,12 @@ func (c *Chat) joinGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 // ────────────────────────────────────────
 func (c *Chat) leaveGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	body := &proto.GroupMemberReq{}
-	if err := parseMsg(req.Body.Msg, body); err != nil {
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	uid, _ := getUidAndName(req.Conn)
+	uid := net.GetUid(req.Conn)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -248,7 +247,7 @@ func (c *Chat) leaveGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 // ────────────────────────────────────────
 func (c *Chat) getGroupMembers(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	body := &proto.GroupMemberReq{}
-	if err := parseMsg(req.Body.Msg, body); err != nil {
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
@@ -268,14 +267,7 @@ func (c *Chat) getGroupMembers(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 //
 // ────────────────────────────────────────
 func (c *Chat) getOnline(req *net.WsMsgReq, rsp *net.WsMsgResp) {
-	uids := make([]string, 0)
-	for _, ws := range net.ConnManager.All() {
-		if ws != nil {
-			if v, err := ws.GetProperty("uid"); err == nil && v != nil {
-				uids = append(uids, v.(string))
-			}
-		}
-	}
+	uids := net.ConnManager.OnlineUids()
 	rsp.Body.Code = 0
 	rsp.Body.Msg = &proto.OnlineUsersResp{Total: len(uids), Uids: uids}
 }
@@ -284,28 +276,10 @@ func (c *Chat) getOnline(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 //  工具函数
 // ────────────────────────────────────────
 
-func getUidAndName(conn net.WSConn) (uid, username string) {
-	if v, err := conn.GetProperty("uid"); err == nil && v != nil {
-		uid = v.(string)
-	}
-	if v, err := conn.GetProperty("username"); err == nil && v != nil {
-		username = v.(string)
-	}
-	return
-}
-
 func genMsgId() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-func parseMsg(raw interface{}, target interface{}) error {
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, target)
 }
 
 func truncate(s string, n int) string {

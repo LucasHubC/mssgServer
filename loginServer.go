@@ -8,6 +8,7 @@ import (
 	rediscache "mssgServer/infra/redis"
 	"mssgServer/infra/rpc"
 	"mssgServer/net"
+	"mssgServer/server/inventory"
 	"mssgServer/server/login"
 	"os"
 	"os/signal"
@@ -25,14 +26,14 @@ func main() {
 
 	// ✅ 初始化数据库（失败直接退出）
 	if err := db.Init(); err != nil {
-		log.Fatal("DB init failed:", err)
+		log.Fatal("DB init failed", "err", err)
 	}
 	defer db.Close()
 
 	// ✅ 初始化 Redis（可选，失败只 warning，不阻塞启动）
 	nodeAddr := fmt.Sprintf("ws://%s:%s", host, port)
 	if err := db.InitRedis(); err != nil {
-		log.Warn("Redis init failed (multi-node features disabled):", err)
+		log.Warn("Redis init failed (multi-node features disabled)", "err", err)
 	} else {
 		defer db.CloseRedis()
 		// 告诉 redis 包"我是谁"，PublishBroadcast 会自动填 FromNode
@@ -46,6 +47,7 @@ func main() {
 	s.SetNodeAddr(fmt.Sprintf("ws://%s:%s", host, port))
 	router := net.NewRouter()
 	login.Init(router)
+	inventory.Init(router) // ← 道具模块：WebSocket 路由 + 定时落盘 goroutine
 	s.Router(router)
 
 	// ──── 🆕 向 Gateway 注册 + 定期心跳 ────
@@ -56,7 +58,7 @@ func main() {
 		HTTPAddr: httpAddr,
 		MaxConns: net.ConnManager.MaxConns(),
 	}); err != nil {
-		log.Warn("register to gateway failed (is gateway running?):", err)
+		log.Warn("register to gateway failed (is gateway running?)", "err", err)
 	}
 	// 心跳协程：每 5s 上报一次当前在线人数
 	go func() {
@@ -103,7 +105,7 @@ func gracefulShutdown(done chan struct{}) {
 	time.Sleep(500 * time.Millisecond)
 
 	// ③ 关闭所有连接（触发各自的 readMsgLoop 退出 → Unregister）
-	log.Info("closing all connections, total=", net.ConnManager.Total())
+	log.Info("closing all connections", "total", net.ConnManager.Total())
 	all := net.ConnManager.All()
 	var wg sync.WaitGroup
 	for _, ws := range all {
@@ -115,11 +117,14 @@ func gracefulShutdown(done chan struct{}) {
 	}
 	wg.Wait()
 
-	// ④ 关数据库和 Redis（由 defer 自动关，如果这里手动关确保顺序也可以）
-	// db.Close() 和 db.CloseRedis() 已通过 main() 的 defer 注册
+	// ④ 强制保存所有脏背包到 MySQL（防止最后 30s 内的修改丢失）
+	log.Info("saving dirty inventory...")
+	inventory.Shutdown()
+
+	// ⑤ 关数据库和 Redis（由 defer 自动关，如果这里手动关确保顺序也可以）
 
 	log.Info("graceful shutdown complete")
 	close(done)
-	fmt.Println("👋 bye~")
+	log.Info("loginServer bye~")
 	os.Exit(0)
 }

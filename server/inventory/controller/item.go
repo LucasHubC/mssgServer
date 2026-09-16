@@ -1,0 +1,288 @@
+package controller
+
+import (
+	"encoding/json"
+	"mssgServer/infra/log"
+	rediscache "mssgServer/infra/redis"
+	"mssgServer/net"
+	invDAO "mssgServer/server/inventory/dao"
+	invProto "mssgServer/server/inventory/proto"
+	"net/http"
+	"sync"
+	"time"
+)
+
+// ItemController 道具控制器（单例）
+var DefaultItem = &ItemController{}
+
+type ItemController struct{}
+
+// ────────────────────────────────────────
+//  WebSocket 路由
+// ────────────────────────────────────────
+
+func (c *ItemController) Router(r *net.Router) {
+	g := r.Group("inventory")
+	g.AddRoute("add", c.add)
+	g.AddRoute("consume", c.consume)
+	g.AddRoute("drop", c.drop)
+	g.AddRoute("get", c.get)
+}
+
+// add 增加道具
+func (c *ItemController) add(req *net.WsMsgReq, rsp *net.WsMsgResp) {
+	uid := net.GetUid(req.Conn)
+	if uid == "" {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "未登录"}
+		return
+	}
+	body := &invProto.AddItemReq{}
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
+		return
+	}
+	newCount, err := rediscache.AddItem(uid, body.ItemId, body.Count)
+	if err != nil {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "操作失败"}
+		return
+	}
+	rsp.Body.Code = 0
+	rsp.Body.Msg = &invProto.AddItemResp{ItemId: body.ItemId, NewCount: newCount}
+}
+
+// consume 使用/消耗道具
+func (c *ItemController) consume(req *net.WsMsgReq, rsp *net.WsMsgResp) {
+	uid := net.GetUid(req.Conn)
+	if uid == "" {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "未登录"}
+		return
+	}
+	body := &invProto.ConsumeItemReq{}
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
+		return
+	}
+	ok, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
+	if err != nil {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "操作失败"}
+		return
+	}
+	if !ok {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "道具数量不足"}
+		return
+	}
+	newCount, _ := rediscache.GetItemCount(uid, body.ItemId)
+	rsp.Body.Code = 0
+	rsp.Body.Msg = &invProto.ConsumeItemResp{ItemId: body.ItemId, NewCount: newCount}
+}
+
+// drop 丢弃道具
+func (c *ItemController) drop(req *net.WsMsgReq, rsp *net.WsMsgResp) {
+	uid := net.GetUid(req.Conn)
+	if uid == "" {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "未登录"}
+		return
+	}
+	body := &invProto.DropItemReq{}
+	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
+		return
+	}
+	// 和 consume 一样的逻辑
+	ok, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
+	if err != nil {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "操作失败"}
+		return
+	}
+	if !ok {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "道具数量不足"}
+		return
+	}
+	newCount, _ := rediscache.GetItemCount(uid, body.ItemId)
+	rsp.Body.Code = 0
+	rsp.Body.Msg = &invProto.DropItemResp{ItemId: body.ItemId, NewCount: newCount}
+}
+
+// get 查背包
+func (c *ItemController) get(req *net.WsMsgReq, rsp *net.WsMsgResp) {
+	uid := net.GetUid(req.Conn)
+	if uid == "" {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "未登录"}
+		return
+	}
+	items, err := rediscache.GetAllItems(uid)
+	if err != nil {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "查询失败"}
+		return
+	}
+	itemList := make([]invProto.ItemInfo, 0, len(items))
+	for id, count := range items {
+		itemList = append(itemList, invProto.ItemInfo{ItemId: id, Count: count})
+	}
+	rsp.Body.Code = 0
+	rsp.Body.Msg = &invProto.GetInventoryResp{Items: itemList, Total: len(itemList)}
+}
+
+// ────────────────────────────────────────
+//  HTTP REST 路由
+// ────────────────────────────────────────
+
+func (c *ItemController) RegisterHttpRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/inventory/add", c.addHttp)
+	mux.HandleFunc("/api/inventory/consume", c.consumeHttp)
+	mux.HandleFunc("/api/inventory/get", c.getHttp)
+}
+
+func (c *ItemController) addHttp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	uid, ok := net.AuthUid(r)
+	if !ok {
+		net.WriteUnauthorized(w, "token 无效")
+		return
+	}
+
+	body := &invProto.AddItemReq{}
+	if err := json.NewDecoder(r.Body).Decode(body); err != nil {
+		net.WriteBadRequest(w, "参数解析失败")
+		return
+	}
+	newCount, err := rediscache.AddItem(uid, body.ItemId, body.Count)
+	if err != nil {
+		net.WriteError(w, "操作失败")
+		return
+	}
+	net.WriteJSON(w, map[string]any{"code": 0, "data": invProto.AddItemResp{ItemId: body.ItemId, NewCount: newCount}})
+}
+
+func (c *ItemController) consumeHttp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	uid, ok := net.AuthUid(r)
+	if !ok {
+		net.WriteUnauthorized(w, "token 无效")
+		return
+	}
+
+	body := &invProto.ConsumeItemReq{}
+	if err := json.NewDecoder(r.Body).Decode(body); err != nil {
+		net.WriteBadRequest(w, "参数解析失败")
+		return
+	}
+	ok2, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
+	if err != nil {
+		net.WriteError(w, "操作失败")
+		return
+	}
+	if !ok2 {
+		net.WriteBadRequest(w, "道具数量不足")
+		return
+	}
+	newCount, _ := rediscache.GetItemCount(uid, body.ItemId)
+	net.WriteJSON(w, map[string]any{"code": 0, "data": invProto.ConsumeItemResp{ItemId: body.ItemId, NewCount: newCount}})
+}
+
+func (c *ItemController) getHttp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	uid, ok := net.AuthUid(r)
+	if !ok {
+		net.WriteUnauthorized(w, "token 无效")
+		return
+	}
+
+	items, err := rediscache.GetAllItems(uid)
+	if err != nil {
+		net.WriteError(w, "查询失败")
+		return
+	}
+	itemList := make([]invProto.ItemInfo, 0, len(items))
+	for id, count := range items {
+		itemList = append(itemList, invProto.ItemInfo{ItemId: id, Count: count})
+	}
+	net.WriteJSON(w, map[string]any{"code": 0, "data": invProto.GetInventoryResp{Items: itemList, Total: len(itemList)}})
+}
+
+// ────────────────────────────────────────
+//  自动保存调度器
+// ────────────────────────────────────────
+
+const autoSaveInterval = 30 * time.Second
+const saveConcurrency = 10 // 定时落盘最大并发数（防 MySQL 连接池耗尽）
+
+// StartAutoSave 启动定时落盘 goroutine（进程启动时调一次）
+func (c *ItemController) StartAutoSave() {
+	go func() {
+		log.Info("[Inventory] auto-save started", "interval", autoSaveInterval, "concurrency", saveConcurrency)
+		ticker := time.NewTicker(autoSaveInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			c.saveDirtyUids()
+		}
+	}()
+}
+
+// SaveAllDirty 立即保存所有脏 uid（优雅关闭时调用）
+func (c *ItemController) SaveAllDirty() {
+	c.saveDirtyUids()
+}
+
+func (c *ItemController) saveDirtyUids() {
+	uids := rediscache.GetDirtyUids()
+	if len(uids) == 0 {
+		return
+	}
+	log.Info("[Inventory] auto-save tick", "dirty_count", len(uids))
+
+	// 并行保存（带并发上限）
+	sem := make(chan struct{}, saveConcurrency)
+	var wg sync.WaitGroup
+	for _, uid := range uids {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(u string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			c.saveOne(u)
+		}(uid)
+	}
+	wg.Wait()
+	log.Info("[Inventory] auto-save done")
+}
+
+// saveOne 保存单个 uid 的背包到 MySQL
+func (c *ItemController) saveOne(uid string) {
+	// 从 Redis 读最新数据
+	rediscache.RemoveZeroCount(uid)
+	items, err := rediscache.GetAllItems(uid)
+	if err != nil {
+		log.Warn("[Inventory] read from redis failed", "uid", uid, "err", err)
+		return
+	}
+	// 写 MySQL
+	if err := invDAO.ItemDAO.SaveAll(uid, items); err != nil {
+		log.Warn("[Inventory] save to mysql failed", "uid", uid, "err", err)
+		return
+	}
+	// 清除脏标记
+	rediscache.ClearDirty(uid)
+}
