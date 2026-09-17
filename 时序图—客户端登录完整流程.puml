@@ -1,81 +1,149 @@
 @startuml
-title 客户端登录完整时序
+autonumber
 
-autonumber "1."
-actor "客户端" as Client
-participant "Gateway\n(:9000)" as GW
-participant "loginServer\n(:8003)" as LS
-participant "Redis" as Redis
-participant "MySQL" as MySQL
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
 
-== 启动阶段 ==
-LS -> GW: POST /gateway/register\n{type:"login", addr:"ws://...", ...}
-GW --> LS: 200 OK
+actor "🎮 Client" as C
+participant "Gateway\n:9000" as GW
+participant "loginServer\n:8003" as LS
+participant "chatServer\n:8004" as CS
+participant "Redis\n:6379" as R
+database "MySQL mssg" as DB
+database "MySQL game_log" as DBLog
 
-loop 每 5 秒
-  LS -> GW: POST /gateway/heartbeat\n{online: N}
-  GW -> GW: Touch 刷新心跳时间
+' ═══════════════════════════════════════
+'  Part 1: HTTP 登录（拿 token）
+' ═══════════════════════════════════════
+== Part 1: HTTP POST /api/login (apiLoginServer :8005) ==
+
+C -> LS: POST /api/login\n{username, password}
+activate LS
+LS -> DB: SELECT * FROM users WHERE username=?
+DB --> LS: User{uid, password(bcrypt)}
+LS -> LS: verifyPassword(bcrypt) ✅
+LS -> R: StoreSession({uid, username})\n→ SET sess:{token} = json\nEX 72h
+R --> LS: "tk_a59f..."
+LS -> LS: LoadInventory(user.uid)\n从 MySQL 加载道具进 Redis
+LS -> DB: SELECT * FROM user_items WHERE uid=?
+DB --> LS: []
+LS --> C: 200 OK\n{"token":"tk_a59f...", "uid":"u_001"}
+deactivate LS
+
+' ═══════════════════════════════════════
+'  Part 2: WS 连 chatServer（token 自动鉴权）
+' ═══════════════════════════════════════
+== Part 2: WebSocket 连 chatServer ==
+
+C -> CS: ws://127.0.0.1:8004?token=tk_a59f...
+activate CS
+CS -> CS: HTTP → WebSocket Upgrade
+CS -> R: GetSession("tk_a59f...")
+R --> CS: {uid:"u_001", username:"admin"}
+CS -> CS: SetProperty("uid", u_001)
+CS -> R: BindUser(u_001, "ws://127.0.0.1:8004")
+R --> CS: OK (分布式锁)
+CS -> CS: ConnManager.Register + BindUid
+CS --> C: 101 Switching Protocols
+CS -> C: Push auth.ok\n{"uid":"u_001", "username":"admin"}
+deactivate CS
+
+' ═══════════════════════════════════════
+'  Part 3: 世界频道聊天（跨服广播）
+' ═══════════════════════════════════════
+== Part 3: 世界频道聊天 (跨服广播) ==
+
+C -> CS: {"name":"chat.world.send", "msg":{"content":"大家好"}}
+activate CS
+CS -> CS: GetAuthInfo → uid="u_001" ✅
+CS -> CS: ConnManager.BroadcastAll()
+
+par 本机推送
+  CS -> CS: Broadcast("chat.world.new", msg)
+  CS -> C: Push chat.world.new {from:"admin", content:"大家好"}
 end
 
-== 客户端请求地址 ==
-Client -> GW: GET /gateway/route?type=login&uid=user_001
-GW -> GW: Route()\n过滤存活节点 + PickNode()
-GW --> Client: {"code":0, "addr":"ws://127.0.0.1:8003"}
+par 跨服推送 (Redis Pub/Sub)
+  CS -> R: PUBLISH node:broadcast\n{action:"broadcast", fromNode:"ws://...8004", data:msg}
+  R -> LS: SubscribeRemoteBroadcast 收到
+  LS -> LS: Broadcast("chat.world.new", msg)
+  LS -> LS: 推给本机所有已连接的 uid
+end
 
-== WebSocket 连接建立 ==
-Client -> LS: HTTP Upgrade → WebSocket
-LS -> LS: wsHandler()\nRegister 到 ConnManager
-LS -> Redis: SubscribeBroadcast (goroutine)
-LS -> Client: 101 Switching Protocols
+deactivate CS
 
-== 心跳（后台自动）==
+' ═══════════════════════════════════════
+'  Part 4: 道具添加（Redis Lua + 定时保存）
+' ═══════════════════════════════════════
+== Part 4: 道具操作 (Redis Lua 原子 + 定时保存) ==
+
+C -> LS: {"name":"inventory.add", "msg":{"itemId":"sword_001", "count":5}}
+activate LS
+LS -> LS: GetAuthInfo → uid="u_001" ✅
+LS -> LS: GetItemCount("u_001", "sword_001")
+
+alt Redis 有值
+  LS -> R: HGET inventory:u_001 sword_001
+  R --> LS: "3" (当前库存)
+else Redis 没有
+  LS -> R: HGET → redis.Nil
+  LS -> DB: SELECT * FROM user_items WHERE uid=? AND item_id=?
+  DB --> LS: NULL
+  LS -> R: HSET inventory:u_001 sword_001 0
+end
+
+LS -> R: **Lua EVAL** (原子)\nHINCRBY inventory:u_001 sword_001 5\nSADD dirty:uids u_001
+R --> LS: 8 (新数量)
+LS -> C: {"code":0, "msg":{"itemId":"sword_001", "count":8}}
+
+' 日志写入 (异步 goroutine)
+LS -> DBLog: INSERT INTO item_op_log\n(uid, item_id, op_type, count, before_count, after_count, source)
+note right: logWg.Add(1) 跟踪\n3s 超时保护
+deactivate LS
+
+' ═══════════════════════════════════════
+'  Part 5: 定时保存后台协程
+' ═══════════════════════════════════════
+== Part 5: 30s 定时保存后台协程 ==
+
 loop 每 30 秒
-  LS -> Client: Ping
-  Client -> LS: Pong
-  LS -> LS: SetReadDeadline(now+90s)
+  LS -> R: SMEMBERS dirty:uids
+  R --> LS: ["u_001", "u_002", ...]
+  
+  par 并发 10 个 goroutine
+    LS -> R: HGETALL inventory:u_001
+    R --> LS: {"sword_001":"8", ...}
+    LS -> DB: REPLACE INTO user_items\n批量写入 (事务)
+    LS -> R: SREM dirty:uids u_001
+  end
 end
 
-== 发送登录请求 ==
-Client -> LS: {"name":"account.login", "seq":1, "msg":{"username":"a","password":"b"}}
-LS -> LS: readMsgLoop()\n限流检查 ✅
-LS -> LS: workerPool <- struct{} (抢到 worker)
+' ═══════════════════════════════════════
+'  Part 6: 优雅关闭
+' ═══════════════════════════════════════
+== Part 6: Ctrl+C 优雅关闭 (graceful shutdown) ==
 
-par 异步执行
-  LS -> LS: Router.Run("account.login")
-  LS -> MySQL: SELECT * FROM users WHERE username=?
+C -> C: (无操作，服务端退出)
+note over LS
+  Ctrl+C / SIGTERM 信号
+  gracefulShutdown() 触发:
   
-  alt 缓存 miss
-    MySQL --> LS: 返回用户
-    LS -> Redis: SET cache:user:name:a = "{...}"\nSET cache:user:uid:u_001 = "{...}"
-  else 缓存 hit
-    LS -> Redis: GET cache:user:name:a
-    Redis --> LS: 返回缓存 JSON
-    note right: 省一次 DB 查询
-  end
+  ① Broadcast("server_shutdown")
+  ② Sleep 300ms 等消息发完
+  ③ Close 所有 WebSocket 连接
+  ④ net.WaitHandlers() ← 等正在执行的 handler
+  ⑤ inventory.Shutdown() ← 强制保存所有 dirty UID
+  ⑥ invDAO.WaitLogWrites() ← 等日志写完
+  ⑦ os.Exit(0)
+end note
 
-  LS -> LS: 比对密码\nuser.Password != body.Password ✅
-
-  LS -> Redis: SetNX lock:bind:u_001\n(分布式锁)
-  Redis --> LS: OK
-  LS -> Redis: SET online:user:u_001 = "ws://127.0.0.1:8003"
-
-  LS -> LS: ConnManager.BindUid()\n本机 uidMap[u_001] = ws
-  
-  alt 同一 uid 旧连接还在
-    LS -> LS: go old.Close()\n(踢下线)
-    LS -> Redis: PublishBroadcast\n{action:"kick", uid:"u_001"}
-    note right: 其他节点收到后\nClose 本机上的旧连接
-  end
-
-  LS -> LS: safeSend(rsp) → outChan
-end
-
-LS -> Client: {"name":"account.login", "seq":1, "code":0, "msg":{"username":"a","session":"sess_..","uid":"u_001"}}
-
-== 断开连接 ==
-Client -> LS: (断开)
-LS -> LS: readMsgLoop ReadMessage error → break
-LS -> LS: Close() → Unregister()
-LS -> Redis: UnbindUser(u_001)\nDEL online:user:u_001
+LS -> LS: ③ Close → CloseAll
+LS -> LS: ④ WaitHandlers()
+LS -> R: ⑤ SMEMBERS dirty:uids
+R --> LS: ["u_001", ...]
+LS -> DB: REPLACE INTO user_items (强制保存)
+LS -> LS: ⑥ WaitLogWrites()
+LS -> DBLog: (等所有 InsertSafe 完成)
+LS -> C: (连接关闭)
 
 @enduml

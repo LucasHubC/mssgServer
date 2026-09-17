@@ -43,12 +43,21 @@ func (c *ItemController) add(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
+	// ✅ Bug #3 fix: 校验 count
+	if body.Count <= 0 {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "数量必须大于 0"}
+		return
+	}
+	// 取 before（必须在 AddItem 之前）
+	before, _ := rediscache.GetItemCount(uid, body.ItemId)
 	newCount, err := rediscache.AddItem(uid, body.ItemId, body.Count)
 	if err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "操作失败"}
 		return
 	}
+	invDAO.ItemOpLogDAO.InsertSafe(uid, body.ItemId, 1, body.Count, before, newCount, "ws_cmd")
 	rsp.Body.Code = 0
 	rsp.Body.Msg = &invProto.AddItemResp{ItemId: body.ItemId, NewCount: newCount}
 }
@@ -67,7 +76,14 @@ func (c *ItemController) consume(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	ok, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
+	// ✅ Bug #3 fix: 校验 count
+	if body.Count <= 0 {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "数量必须大于 0"}
+		return
+	}
+	// ✅ Bug #2 fix: ConsumeItem 直接返回 newCount，不再额外 GetItemCount
+	ok, countOrBefore, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
 	if err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "操作失败"}
@@ -78,9 +94,11 @@ func (c *ItemController) consume(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "道具数量不足"}
 		return
 	}
-	newCount, _ := rediscache.GetItemCount(uid, body.ItemId)
+	// 日志：before = countOrBefore + body.Count（因为成功时 Lua 返回的是扣减后 count）
+	before := countOrBefore + body.Count
+	invDAO.ItemOpLogDAO.InsertSafe(uid, body.ItemId, 2, body.Count, before, countOrBefore, "ws_cmd")
 	rsp.Body.Code = 0
-	rsp.Body.Msg = &invProto.ConsumeItemResp{ItemId: body.ItemId, NewCount: newCount}
+	rsp.Body.Msg = &invProto.ConsumeItemResp{ItemId: body.ItemId, NewCount: countOrBefore}
 }
 
 // drop 丢弃道具
@@ -97,8 +115,14 @@ func (c *ItemController) drop(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	// 和 consume 一样的逻辑
-	ok, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
+	// ✅ Bug #3 fix: 校验 count
+	if body.Count <= 0 {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "数量必须大于 0"}
+		return
+	}
+	// ✅ Bug #2 fix: 直接用 ConsumeItem 返回的 newCount
+	ok, newCount, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
 	if err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "操作失败"}
@@ -109,7 +133,8 @@ func (c *ItemController) drop(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "道具数量不足"}
 		return
 	}
-	newCount, _ := rediscache.GetItemCount(uid, body.ItemId)
+	before := newCount + body.Count
+	invDAO.ItemOpLogDAO.InsertSafe(uid, body.ItemId, 3, body.Count, before, newCount, "ws_cmd")
 	rsp.Body.Code = 0
 	rsp.Body.Msg = &invProto.DropItemResp{ItemId: body.ItemId, NewCount: newCount}
 }
@@ -148,7 +173,7 @@ func (c *ItemController) RegisterHttpRoutes(mux *http.ServeMux) {
 
 func (c *ItemController) addHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		net.WriteBadRequest(w, "method not allowed")
 		return
 	}
 	uid, ok := net.AuthUid(r)
@@ -162,17 +187,25 @@ func (c *ItemController) addHttp(w http.ResponseWriter, r *http.Request) {
 		net.WriteBadRequest(w, "参数解析失败")
 		return
 	}
+	// ✅ Bug #3 fix: 校验 count
+	if body.Count <= 0 {
+		net.WriteBadRequest(w, "数量必须大于 0")
+		return
+	}
+	// 取 before
+	before, _ := rediscache.GetItemCount(uid, body.ItemId)
 	newCount, err := rediscache.AddItem(uid, body.ItemId, body.Count)
 	if err != nil {
 		net.WriteError(w, "操作失败")
 		return
 	}
+	invDAO.ItemOpLogDAO.InsertSafe(uid, body.ItemId, 1, body.Count, before, newCount, "http_api")
 	net.WriteJSON(w, map[string]any{"code": 0, "data": invProto.AddItemResp{ItemId: body.ItemId, NewCount: newCount}})
 }
 
 func (c *ItemController) consumeHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		net.WriteBadRequest(w, "method not allowed")
 		return
 	}
 	uid, ok := net.AuthUid(r)
@@ -186,7 +219,13 @@ func (c *ItemController) consumeHttp(w http.ResponseWriter, r *http.Request) {
 		net.WriteBadRequest(w, "参数解析失败")
 		return
 	}
-	ok2, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
+	// ✅ Bug #3 fix: 校验 count
+	if body.Count <= 0 {
+		net.WriteBadRequest(w, "数量必须大于 0")
+		return
+	}
+	// ✅ Bug #2 fix: 直接用 ConsumeItem 返回的 newCount
+	ok2, newCount, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
 	if err != nil {
 		net.WriteError(w, "操作失败")
 		return
@@ -195,13 +234,14 @@ func (c *ItemController) consumeHttp(w http.ResponseWriter, r *http.Request) {
 		net.WriteBadRequest(w, "道具数量不足")
 		return
 	}
-	newCount, _ := rediscache.GetItemCount(uid, body.ItemId)
+	before := newCount + body.Count
+	invDAO.ItemOpLogDAO.InsertSafe(uid, body.ItemId, 2, body.Count, before, newCount, "http_api")
 	net.WriteJSON(w, map[string]any{"code": 0, "data": invProto.ConsumeItemResp{ItemId: body.ItemId, NewCount: newCount}})
 }
 
 func (c *ItemController) getHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		net.WriteBadRequest(w, "method not allowed")
 		return
 	}
 	uid, ok := net.AuthUid(r)

@@ -117,11 +117,13 @@ func gracefulShutdown(done chan struct{}) {
 	}
 	wg.Wait()
 
-	// ④ 强制保存所有脏背包到 MySQL（防止最后 30s 内的修改丢失）
+	// ④ 等所有正在执行的 handler 跑完（防止 handler 正在写 DB 时被强制断开）
+	log.Info("waiting handlers to finish...")
+	net.WaitHandlers()
+
+	// ⑤ 强制保存所有脏背包到 MySQL（防止最后 30s 内的修改丢失）
 	log.Info("saving dirty inventory...")
 	inventory.Shutdown()
-
-	// ⑤ 关数据库和 Redis（由 defer 自动关，如果这里手动关确保顺序也可以）
 
 	log.Info("graceful shutdown complete")
 	close(done)

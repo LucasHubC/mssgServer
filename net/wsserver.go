@@ -17,6 +17,21 @@ import (
 // 正常情况下不会打满。如果打满说明 DB 是真瓶颈了。
 var workerPool = make(chan struct{}, 2048)
 
+// handlerWg 全局 handler WaitGroup — 用于 graceful shutdown 时等所有在跑的 handler 跑完
+var handlerWg sync.WaitGroup
+
+// WaitHandlers 阻塞等所有正在执行的 handler 跑完（graceful shutdown 时调）
+func WaitHandlers() {
+	handlerWg.Wait()
+}
+
+const (
+	// pingInterval 心跳发送间隔
+	pingInterval = 30 * time.Second
+	// pongTimeout 多久没收到 Pong 就认为连接已死
+	pongTimeout = 60 * time.Second
+)
+
 // WSServer 服务器端
 type WSServer struct {
 	wsConn *websocket.Conn
@@ -139,8 +154,35 @@ func (s *WSServer) Push(name string, data interface{}) {
 
 // 通道一旦建立 那么收发消息都要持续去监听通道
 func (s *WSServer) Start() {
+	// ✅ 加 Pong 处理：收到 Pong 时延长 ReadDeadline
+	s.wsConn.SetPongHandler(func(string) error {
+		_ = s.wsConn.SetReadDeadline(time.Now().Add(pongTimeout))
+		return nil
+	})
+	// 初始 ReadDeadline
+	_ = s.wsConn.SetReadDeadline(time.Now().Add(pongTimeout))
+
+	go s.pingLoop() // 心跳
 	go s.writeMsgLoop()
 	go s.readMsgLoop()
+}
+
+// pingLoop 心跳循环 — 每 30s 发一次 Ping，连接断开时退出
+func (s *WSServer) pingLoop() {
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := s.writeMessage(websocket.PingMessage, nil); err != nil {
+				log.Warn("heartbeat ping failed", "addr", s.Addr(), "err", err)
+				s.Close()
+				return
+			}
+		case <-s.done:
+			return // 连接已关闭
+		}
+	}
 }
 
 func (s *WSServer) writeMsgLoop() {
@@ -197,7 +239,9 @@ func (s *WSServer) readMsgLoop() {
 		select {
 		case workerPool <- struct{}{}:
 			// 抢到 worker，异步执行 handler
+			handlerWg.Add(1)
 			go func() {
+				defer handlerWg.Done()
 				defer func() { <-workerPool }()
 				defer func() {
 					if r := recover(); r != nil {
@@ -213,8 +257,12 @@ func (s *WSServer) readMsgLoop() {
 		default:
 			// worker pool 满了，降级为同步执行（极端保护）
 			log.Warn("worker pool full, fallback to sync", "addr", s.Addr())
-			s.router.Run(req, rsp)
-			s.safeSend(rsp)
+			handlerWg.Add(1)
+			func() {
+				defer handlerWg.Done()
+				s.router.Run(req, rsp)
+				s.safeSend(rsp)
+			}()
 		}
 	}
 

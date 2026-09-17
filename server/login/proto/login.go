@@ -10,7 +10,7 @@ type LoginReq struct {
 
 type LoginResp struct {
 	Username string `json:"username"`
-	Session  string `json:"session"`
+	Token    string `json:"token"`
 	UId      string `json:"uid"`
 }
 

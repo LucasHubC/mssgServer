@@ -2,8 +2,8 @@ package net
 
 import (
 	"mssgServer/infra/log"
+	rediscache "mssgServer/infra/redis"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -28,12 +28,6 @@ func (s *Server) Router(r *Router) {
 func (s *Server) SetNodeAddr(addr string) {
 	s.nodeAddr = addr
 }
-
-// WebSocket 心跳参数
-const (
-	heartbeatInterval = 30 * time.Second // 服务器每 30s 发一次 Ping
-	heartbeatTimeout  = 90 * time.Second // 90s 没收到 Pong 就断连（3 个心跳周期）
-)
 
 func (s *Server) Start() {
 	// ⚠️ ReadTimeout/WriteTimeout/IdleTimeout 对 WebSocket 长连接必须设为 0
@@ -60,7 +54,8 @@ var wsUpgrader = websocket.Upgrader{
 func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	// ① Upgrade 之前先查连接数，满了返回 503
 	if ConnManager.Total() >= ConnManager.MaxConns() {
-		http.Error(w, "server full", http.StatusServiceUnavailable)
+		WriteJSONWithStatus(w, http.StatusServiceUnavailable,
+			map[string]any{"code": -1, "errMsg": "server full"})
 		return
 	}
 
@@ -71,55 +66,50 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ③ 注册到全局连接管理器
+	// ③ 创建 WSServer
 	wsServer := newWsServer(wsConn)
 	wsServer.Router(s.router)
-	wsServer.NodeAddr = s.nodeAddr // 绑定当前节点地址（Redis 跨节点同步用）
-	ConnManager.Register(wsServer)
+	wsServer.NodeAddr = s.nodeAddr
 
-	// ──── 心跳设置（三要素缺一不可）────
-	// ① PongHandler：收到 Pong 后重置 ReadDeadline（仅读侧，无并发写）
-	wsConn.SetPongHandler(func(appData string) error {
-		wsConn.SetReadDeadline(time.Now().Add(heartbeatTimeout))
-		return nil
-	})
-	// ② PingHandler：收到客户端 Ping 后回 Pong，必须走 writeMessage 加锁
-	// （此回调在 ReadMessage 协程里触发，与 writeMsgLoop / wsHeartbeat 并发）
-	wsConn.SetPingHandler(func(appData string) error {
-		return wsServer.writeMessage(websocket.PongMessage, nil)
-	})
-	// ③ 初始 ReadDeadline + 启动服务器主动发 Ping 的协程
-	wsConn.SetReadDeadline(time.Now().Add(heartbeatTimeout))
-	go wsHeartbeat(wsServer)
+	// ④ Query Token 自动鉴权（跨 Server 统一支持）
+	// 客户端连 chatServer 时可以 ws://host:8004?token=xxx，自动从 Redis session 绑定 uid
+	if token := r.URL.Query().Get("token"); token != "" {
+		if sess, ok := rediscache.GetSession(token); ok {
+			wsServer.SetProperty("uid", sess.UId)
+			wsServer.SetProperty("username", sess.Username)
+			log.Info("ws auto auth via token", "uid", sess.UId, "username", sess.Username)
+			// 绑定到 ConnManager（跨服 PushToUid / BindUid 需要）
+			ConnManager.BindUid(sess.UId, wsServer)
+		} else {
+			log.Warn("ws auth failed: invalid token", "remote", r.RemoteAddr)
+		}
+	}
+
+	// ⑤ 注册到全局连接管理器
+	ConnManager.Register(wsServer)
 
 	defer ConnManager.Unregister(wsServer)
 
 	log.Info("client connected", "addr", wsConn.RemoteAddr().String(), "total", ConnManager.Total())
 
-	// ④ 启动收发循环（非阻塞）
+	// ⑥ 启动收发循环（非阻塞）
 	wsServer.Start()
+
+	// ⑦ 给客户端发鉴权结果（Start 之后才能 Push，outChan 已初始化）
+	if uid := GetUid(wsServer); uid != "" {
+		wsServer.Push("auth.ok", map[string]any{
+			"uid":      uid,
+			"username": GetUsername(wsServer),
+		})
+	} else if r.URL.Query().Get("token") != "" {
+		wsServer.Push("auth.fail", map[string]any{
+			"errMsg": "token 无效或已过期",
+		})
+	}
 
 	// ⑤ 阻塞等连接关闭 —— 等 readMsgLoop/Close 把 done channel 关掉
 	// 这样 defer Unregister 会在连接真正断开后才执行
 	wsServer.WaitClose()
 
 	log.Info("client disconnected", "addr", wsConn.RemoteAddr().String(), "total", ConnManager.Total())
-}
-
-// wsHeartbeat 服务器主动发 Ping 的协程
-// 每隔 heartbeatInterval 发一次 Ping，写走 writeMessage 加锁，与 writeMsgLoop / PingHandler 互斥
-// 写失败说明连接已死，由 readMsgLoop 那边感知到 ReadDeadline 超时后自然断开
-func wsHeartbeat(ws *WSServer) {
-	ticker := time.NewTicker(heartbeatInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if err := ws.writeMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
-		case <-ws.done: // ← readMsgLoop/Close 通知了，马上退
-			return
-		}
-	}
 }

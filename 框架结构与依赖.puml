@@ -1,218 +1,207 @@
 @startuml
-title mssgServer 框架类图
-
 skinparam packageStyle rectangle
 skinparam classAttributeIconSize 0
+skinparam nodesep 60
+skinparam ranksep 80
 
-package "net 传输层" {
-  class Server {
-    - address: string
-    - router: *Router
-    - nodeAddr: string
-    + NewServer(addr) *Server
-    + Router(r)
-    + SetNodeAddr(addr)
-    + Start()
-    - wsHandler(w, r)
-  }
+' 布局方向：自上而下，底层在最下
+top to bottom direction
 
-  class WSServer {
-    - wsConn: *websocket.Conn
-    - router: *Router
-    - outChan: chan *WsMsgResp
-    - Seq: int64
-    - property: map[string]interface{}
-    - propertyLock: RWMutex
-    - limiter: *rate.Limiter
-    - done: chan struct{}
-    - once: sync.Once
-    - writeMu: Mutex
-    - sendMu: Mutex
-    - closed: bool
-    + NodeAddr: string
-    + SetProperty(k, v)
-    + GetProperty(k) (interface{}, error)
-    + Addr() string
-    + Push(name, data)
-    + Start()
-    + Close()
-    + WaitClose()
-    - readMsgLoop()
-    - writeMsgLoop()
-    - writeMessage()
-    - safeSend()
-  }
+' ======================================
+'  第一层：底层基础设施（被依赖，放最下）
+' ======================================
+package "⚙️  底层基础设施" as INFRA #E8F5E9 {
 
-  class ConnManager {
-    - mu: RWMutex
-    - conns: map[*WSServer]struct{}
-    - uidMap: map[string]*WSServer
-    - total: int64
-    - maxConns: int64
-    + Register(ws) bool
-    + Unregister(ws)
-    + BindUid(uid, ws)
-    + GetByUid(uid) *WSServer
-    + Broadcast(name, data)
-    + KickByUid(uid)
-    + Total() int64
-    + All() []*WSServer
-    + SubscribeRemoteBroadcast()
-  }
-
-  class Router {
-    - groups: map[string]*group
-    + NewRouter()
-    + Group(prefix) *group
-    + Run(req, rsp)
-  }
-
-  class group {
-    - prefix: string
-    - handlerMap: map[string]HandlerFunc
-    + AddRoute(name, handler)
-  }
-
-  interface WSConn {
-    + Addr() string
-    + SetProperty(k, v)
-    + GetProperty(k)
-  }
-
-  WSServer ..|> WSConn
-  Server --> Router
-  Server "1" o-- "*" WSServer
-  Router --> group
-  ConnManager o-- WSServer
-
-  note right of Server
-    HTTP Server + WebSocket 升级
-    心跳三要素 + done channel
-  end note
-
-  note right of WSServer
-    每连接 2 goroutine:
-    readMsgLoop → worker pool
-    writeMsgLoop → outChan
-  end note
-
-  note right of ConnManager
-    单例全局连接管理器
-    + Redis 跨节点同步
-  end note
-}
-
-package "gateway 网关层" {
-  class Gateway {
-    - mu: RWMutex
-    - nodes: map[string][]*Node
-    - policy: RoutePolicy
-    + Register(req) error
-    + Heartbeat(req) error
-    + Route(req) *RouteResp
-    + CleanupLoop()
-    - HandleRegister()
-    - HandleHeartbeat()
-    - HandleRoute()
-    - HandleStatus()
-  }
-
-  class Node {
-    - Type: string
-    - Addr: string
-    - HTTPAddr: string
-    - MaxConns: int64
-    - Online: int64
-    - lastHeartbeat: time.Time
-    + IsAlive() bool
-    + Touch(online)
-  }
-
-  Gateway o-- Node
-}
-
-package "infra 基础设施" {
   package "infra/redis" {
-    class RedisCache {
-      .. 静态方法 ..
-      + BindUser(uid, nodeAddr) bool
-      + UnbindUser(uid)
-      + GetUserNode(uid) (string, bool)
-      + PublishBroadcast(msg)
-      + SubscribeBroadcast(handler)
-      + GetUserCache(key) ([]byte, bool)
-      + SetUserCache(key, data)
-      + DelUserCache(keys...)
-      + TryLock(key, ttl) (func(), bool)
+    class RedisSession <<会话+在线>> {
+      + StoreSession()
+      + GetSession()
+      + BindUser()
+      + PublishBroadcast()
+    }
+    class RedisInventory <<道具原子>> {
+      + AddItem()
+      + ConsumeItem()
+      + SaveAll()
+      + LoadInventory()
     }
   }
 
   package "infra/rpc" {
-    class RpcClient {
-      .. 静态方法 ..
-      + Register(gwURL, req) error
-      + Heartbeat(gwURL, req)
+    class RPC <<HTTP 客户端>> {
+      + Register(gwURL)
+      + Heartbeat(gwURL)
     }
   }
 
   package "infra/log" {
     class Logger {
-      + Init()
-      + Info(msg, args...)
-      + Warn(msg, args...)
-      + Error(msg, args...)
-      + Debug(msg, args...)
+      + Info() / Warn() / Error()
     }
   }
 }
 
-package "config 配置层" {
-  class DB {
-    + DB: *sql.DB
-    + RDB: *redis.Client
-    + Init() error
-    + Close()
-    + InitRedis() error
-    + CloseRedis()
+package "🗄️  数据层" as DB #FCE4EC {
+  class DB <<MySQL + Redis 连接池>> {
+    + DB (mssg, 300)
+    + DBLog (game_log, 100)
+    + RDB (Redis, 100)
   }
 }
 
-package "server/login 业务层" {
-  class Account {
-    + Router(r *Router)
-    + login(req, rsp)
+' ======================================
+'  第二层：net 传输层（中间内核）
+' ======================================
+package "🌐  net 传输层 (内核)" as NET #E3F2FD {
+
+  class Server <<WS 服务入口>> {
+    + NewServer(addr)
+    + Router(r)
+    + Start()
   }
 
-  class UserDAO {
-    + GetByUsername(username) (*User, error)
-    + GetByUid(uid) (*User, error)
-    + UpdatePassword(uid, pwd) error
-    + UpdateUsername(uid, name) error
-    + DeleteById(id) error
-    + DeleteByUid(uid) error
+  class WSServer <<单连接>> {
+    - outChan: 256
+    - limiter: 30/s
+    + Push()
+    + Start()
+    + pingLoop(30s)
   }
 
-  class User {
-    + Id: int64
-    + UId: string
-    + Username: string
-    + Password: string
+  class ConnManager <<全局连接表>> {
+    - maxConns: 20000
+    + BindUid()
+    + BroadcastAll()
+    + PushToUid()
+    + SubscribeRemoteBroadcast()
   }
 
-  Account --> UserDAO
-  UserDAO --> User
+  class Router <<消息路由>>
 }
 
-' ──── 跨包依赖 ────
-Server --> Config : 读取配置
-WSServer --> Logger
-ConnManager --> RedisCache : 跨节点同步
-ConnManager --> Logger
-UserDAO --> DB
-UserDAO --> RedisCache
-Account --> Logger
-Gateway --> Logger
-Gateway --> RpcClient : HTTP handler 用类型
-Server ..> RpcClient : 启动时注册/心跳
+' ======================================
+'  第三层：业务层 + 网关层（顶层）
+' ======================================
+
+' 左边：业务 Server
+package "🎮  业务 Server (login/chat/api)" as SERVER #FFF3E0 {
+
+  package "login 模块" {
+    class AccountController {
+      + login() / register()
+      + loginHttp() / meHttp()
+    }
+    class UserDAO {
+      + GetByUsername()
+    }
+  }
+
+  package "inventory 模块" {
+    class ItemController {
+      + add() / consume() / get()
+      + StartAutoSave() 30s
+      + Shutdown()
+    }
+    class ItemDAO {
+      + LoadByUid() / SaveAll()
+    }
+    class ItemOpLogDAO {
+      + InsertSafe()
+      + WaitLogWrites()
+    }
+  }
+
+  package "chat 模块" {
+    class ChatController {
+      + sendWorld()
+      + sendPrivate()
+      + sendGroup()
+    }
+  }
+}
+
+' 右边：Gateway 网关
+package "🔀  Gateway 网关 (独立进程)" as GW #F3E5F5 {
+  class Gateway <<路由发现+注册中心>> {
+    + Register()
+    + Heartbeat()
+    + Route()
+    + CleanupLoop()
+    -- Admin --
+    + HandleAdminBroadcast()
+    + HandleAdminPush()
+    + HandleAdminKick()
+  }
+  class Node {
+    + IsAlive()
+    + Touch()
+  }
+  class Route {
+    + RoundRobin()
+    + PickNode()
+  }
+}
+
+' ======================================
+'  依赖关系（从上层指向下层）
+' ======================================
+
+' ── gateway 依赖 ──
+Gateway ..> RPC : 用 Request/Response
+Gateway ..> RedisSession : Admin 广播 Pub/Sub
+Gateway --> Node
+Gateway --> Route
+
+' ── server 业务层依赖 ──
+AccountController --> RedisSession : StoreSession
+AccountController --> UserDAO
+ItemController --> RedisInventory : AddItem/ConsumeItem
+ItemController --> ItemDAO
+ItemController --> ItemOpLogDAO
+ItemOpLogDAO ..> DB : 写 DBLog
+ChatController ..> RedisSession : GetUserNode
+ChatController ..> ConnManager : BroadcastAll
+
+' ── server -> gateway (反向注册) ──
+AccountController ..> RPC : 启动时注册
+ChatController ..> RPC : 启动时注册
+ItemController ..> RPC : 启动时注册
+
+' ── net 传输层依赖 ──
+Server --> Router
+Server o-- WSServer
+WSServer --> ConnManager
+Server ..> RedisSession : token 鉴权
+ConnManager ..> RedisSession : BindUser/PublishBroadcast
+
+' ── 底层依赖 ──
+Server ..> DB : Init()
+AccountController ..> DB
+ItemController ..> DB
+DB ..> Logger
+Gateway ..> Logger
+
+' ======================================
+'  布局对齐控制（hidden link 强制对齐）
+' ======================================
+Server -[hidden]down- DB
+GW -[hidden]- SERVER
+
+' ======================================
+'  图例
+' ======================================
+legend bottom center
+  ┌──────────────────────────────────────────────────────────┐
+  │  🔵 net (内核)   🟢 infra (底层)   🟠 server (业务)      │
+  │  🔴 gateway (网关)   🩷 config/DB (数据)                  │
+  │                                                          │
+  │  实线 = 强依赖创建    虚线 = 弱依赖/调用                   │
+  │                                                          │
+  │  💡 架构: 每个 Server 独立 ConnManager，跨服靠 Redis       │
+  │  💡 道具修改只写 Redis(Lua)，MySQL 30s 定时落盘            │
+  │  💡 WS ?token=xxx 自动鉴权                                │
+  │  💡 Gateway 无业务状态，只存节点列表                        │
+  └──────────────────────────────────────────────────────────┘
+endlegend
 
 @enduml

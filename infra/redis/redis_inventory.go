@@ -12,10 +12,13 @@
 package redis
 
 import (
+	"errors"
 	"fmt"
 	"mssgServer/config/db"
 	"mssgServer/infra/log"
 	"strconv"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // inventoryKey 背包 Redis key
@@ -30,7 +33,7 @@ func MarkDirty(uid string) {
 	if db.RDB == nil {
 		return
 	}
-	db.RDB.SAdd(ctx, dirtyUidsKey, uid)
+	db.RDB.SAdd(redisCtx(), dirtyUidsKey, uid)
 }
 
 // GetDirtyUids 取出所有脏 uid（定时落盘时调用）
@@ -38,7 +41,7 @@ func GetDirtyUids() []string {
 	if db.RDB == nil {
 		return nil
 	}
-	uids, err := db.RDB.SMembers(ctx, dirtyUidsKey).Result()
+	uids, err := db.RDB.SMembers(redisCtx(), dirtyUidsKey).Result()
 	if err != nil {
 		log.Warn("redis GetDirtyUids failed", "err", err)
 		return nil
@@ -51,7 +54,7 @@ func ClearDirty(uid string) {
 	if db.RDB == nil {
 		return
 	}
-	db.RDB.SRem(ctx, dirtyUidsKey, uid)
+	db.RDB.SRem(redisCtx(), dirtyUidsKey, uid)
 }
 
 // ────────────────────────────────────────
@@ -59,68 +62,121 @@ func ClearDirty(uid string) {
 // ────────────────────────────────────────
 
 // LoadInventory 上线时从 MySQL 全量加载进 Redis
-// items: {item_id: count} — 从 DAO 层查出来的
+// 设计：用 Lua 原子写入，只在 Redis Hash 为空时才写（避免覆盖其他连接刚写的新数据）
+//   - 如果 Redis 已有数据（另一个登录先写了）→ 跳过，直接返回
+//   - 如果 Redis 空（正常冷启动）→ 全量写入 MySQL 数据
 func LoadInventory(uid string, items map[string]int64) error {
 	if db.RDB == nil {
 		return fmt.Errorf("redis not initialized")
 	}
 	key := inventoryKey(uid)
-	// 先清掉旧的（防止脏数据）
-	db.RDB.Del(ctx, key)
+
+	// Lua 脚本：只有 Hash 为空时才写入（原子操作，避免 Del+Set 之间被其他线程插入新数据）
+	// 返回 1=写入了 MySQL 数据，0=跳过（Redis 已有数据）
 	if len(items) == 0 {
-		return nil
+		// MySQL 也没数据，如果 Redis 也空就跳过，Redis 有数据就保留
+		script := `
+			if redis.call('HLEN', KEYS[1]) == 0 then
+				return 1
+			end
+			return 0
+		`
+		result, err := db.RDB.Eval(redisCtx(), script, []string{key}).Int64()
+		if err != nil {
+			return err
+		}
+		if result == 1 {
+			return nil // Redis 空 + MySQL 空 → 什么都不做
+		}
+		return nil // Redis 有数据 → 保留，不覆盖
 	}
-	pipe := db.RDB.Pipeline()
+
+	// 有 MySQL 数据 → Lua 原子判断+写入
+	// ARGV 格式: count, item1, val1, item2, val2, ...
+	args := make([]interface{}, 0, 1+len(items)*2)
+	args = append(args, len(items))
 	for itemID, count := range items {
-		pipe.HSet(ctx, key, itemID, count)
+		args = append(args, itemID, strconv.FormatInt(count, 10))
 	}
-	_, err := pipe.Exec(ctx)
+	script := `
+		if redis.call('HLEN', KEYS[1]) > 0 then
+			return 0  -- Redis 已有数据，跳过
+		end
+		local n = tonumber(ARGV[1])
+		for i = 1, n do
+			redis.call('HSET', KEYS[1], ARGV[2*i], ARGV[2*i+1])
+		end
+		return 1  -- 写入成功
+	`
+	_, err := db.RDB.Eval(redisCtx(), script, []string{key}, args...).Int64()
 	return err
 }
 
-// AddItem 增加道具（原子 HINCRBY，数量可为负）
+// AddItem 增加道具（Lua 脚本保证 HINCRBY + MarkDirty 原子性）
+// 数量可为负（扣减也走这里，但推荐用 ConsumeItem 有足够性检查）
 func AddItem(uid, itemID string, delta int64) (int64, error) {
 	if db.RDB == nil {
 		return 0, fmt.Errorf("redis not initialized")
 	}
 	key := inventoryKey(uid)
-	newCount, err := db.RDB.HIncrBy(ctx, key, itemID, delta).Result()
+	script := `
+		local new = redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2])
+		redis.call('SADD', KEYS[2], ARGV[3])
+		return new
+	`
+	newCount, err := db.RDB.Eval(redisCtx(), script,
+		[]string{key, dirtyUidsKey},
+		itemID, strconv.FormatInt(delta, 10), uid,
+	).Int64()
 	if err != nil {
 		log.Warn("redis AddItem failed", "uid", uid, "item", itemID, "err", err)
 		return 0, err
 	}
-	MarkDirty(uid)
 	return newCount, nil
 }
 
-// ConsumeItem 消耗道具（Lua 脚本保证"检查-扣减"原子性）
-// 返回 (true, nil) = 成功扣减；(false, nil) = 数量不足；(false, err) = Redis 错误
-func ConsumeItem(uid, itemID string, need int64) (bool, error) {
+// ConsumeItem 消耗道具（Lua 脚本保证"检查-扣减-返回新值"原子性）
+// 返回 (success, newCount, err)
+//
+//	success=true,  newCount=扣减后数量, err=nil   → 成功
+//	success=false, newCount=扣减前数量, err=nil   → 数量不足
+//	success=false, newCount=0,        err!=nil   → Redis 错误
+func ConsumeItem(uid, itemID string, need int64) (bool, int64, error) {
 	if db.RDB == nil {
-		return false, fmt.Errorf("redis not initialized")
+		return false, 0, fmt.Errorf("redis not initialized")
 	}
 	key := inventoryKey(uid)
 
-	// Lua 脚本：检查 → 扣减 → 返回 1(成功)/0(不足)
+	// Lua 脚本：检查 → 扣减 → 标记 dirty → 返回 {success(0/1), after_or_before}
+	// 成功返回 {1, afterCount}，失败返回 {0, beforeCount}
+	// KEYS: [1]=背包hash, [2]=dirty UID set
+	// ARGV: [1]=itemID, [2]=need, [3]=uid
 	script := `
 		local cur = tonumber(redis.call('HGET', KEYS[1], ARGV[1]) or '0')
 		if cur < tonumber(ARGV[2]) then
-			return 0
+			return {0, cur}
 		end
 		redis.call('HINCRBY', KEYS[1], ARGV[1], -tonumber(ARGV[2]))
-		return 1
+		redis.call('SADD', KEYS[2], ARGV[3])
+		return {1, cur - tonumber(ARGV[2])}
 	`
-	result, err := db.RDB.Eval(ctx, script,
-		[]string{key}, itemID, strconv.FormatInt(need, 10)).Int64()
+	result, err := db.RDB.Eval(redisCtx(), script,
+		[]string{key, dirtyUidsKey},
+		itemID, strconv.FormatInt(need, 10), uid).Slice()
 	if err != nil {
 		log.Warn("redis ConsumeItem failed", "uid", uid, "item", itemID, "err", err)
-		return false, err
+		return false, 0, err
 	}
-	if result == 1 {
-		MarkDirty(uid)
-		return true, nil
+	// 解析 Lua 返回的数组 [success, count]
+	if len(result) >= 2 {
+		success, _ := strconv.ParseInt(fmt.Sprint(result[0]), 10, 64)
+		count, _ := strconv.ParseInt(fmt.Sprint(result[1]), 10, 64)
+		if success == 1 {
+			return true, count, nil
+		}
+		return false, count, nil // 数量不足，count = before
 	}
-	return false, nil // 数量不足
+	return false, 0, fmt.Errorf("unexpected lua result length")
 }
 
 // GetItemCount 查询单个道具数量
@@ -128,9 +184,9 @@ func GetItemCount(uid, itemID string) (int64, error) {
 	if db.RDB == nil {
 		return 0, fmt.Errorf("redis not initialized")
 	}
-	val, err := db.RDB.HGet(ctx, inventoryKey(uid), itemID).Result()
+	val, err := db.RDB.HGet(redisCtx(), inventoryKey(uid), itemID).Result()
 	if err != nil {
-		if err.Error() == "redis: nil" {
+		if errors.Is(err, redis.Nil) {
 			return 0, nil // 没有这个道具 = 0
 		}
 		return 0, err
@@ -143,7 +199,7 @@ func GetAllItems(uid string) (map[string]int64, error) {
 	if db.RDB == nil {
 		return nil, fmt.Errorf("redis not initialized")
 	}
-	raw, err := db.RDB.HGetAll(ctx, inventoryKey(uid)).Result()
+	raw, err := db.RDB.HGetAll(redisCtx(), inventoryKey(uid)).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -158,18 +214,19 @@ func GetAllItems(uid string) (map[string]int64, error) {
 }
 
 // RemoveZeroCount 清理背包里 count<=0 的道具（保存前顺手清）
+// 用 Lua 脚本原子清理，避免 HGetAll + N 次 HDel 的多次 RT
 func RemoveZeroCount(uid string) {
 	if db.RDB == nil {
 		return
 	}
-	all, err := db.RDB.HGetAll(ctx, inventoryKey(uid)).Result()
-	if err != nil {
-		return
-	}
-	for field, v := range all {
-		n, _ := strconv.ParseInt(v, 10, 64)
-		if n <= 0 {
-			db.RDB.HDel(ctx, inventoryKey(uid), field)
-		}
-	}
+	script := `
+		local all = redis.call('HGETALL', KEYS[1])
+		for i = 1, #all, 2 do
+			local count = tonumber(all[i+1])
+			if count <= 0 then
+				redis.call('HDEL', KEYS[1], all[i])
+			end
+		end
+	`
+	db.RDB.Eval(redisCtx(), script, []string{inventoryKey(uid)})
 }

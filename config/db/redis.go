@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mssgServer/config"
 	"mssgServer/infra/log"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -30,8 +31,9 @@ func InitRedis() error {
 	})
 
 	// 验证连接
-	ctx := context.Background()
-	if err := RDB.Ping(ctx).Err(); err != nil {
+	pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := RDB.Ping(pingCtx).Err(); err != nil {
 		return fmt.Errorf("redis.Ping failed: %w", err)
 	}
 

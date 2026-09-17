@@ -1,62 +1,147 @@
 @startuml
-title mssgServer 多节点集群部署架构
-
-' 客户端
-rectangle "客户端" as client
-
-' 服务器 A
-rectangle "云服务器 A (2C4G)" as A {
-  artifact "Gateway\n端口:9000" as gw
-  artifact "loginServer-1\n端口:8001" as ls1
-  database "MySQL" as mysql
-  database "Redis" as redis
+skinparam nodesep 80
+skinparam ranksep 100
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor<<gw>> #F3E5F5
+  BackgroundColor<<app>> #E8F4FD
+  BackgroundColor<<db>> #FFF3E0
+  BackgroundColor<<cache>> #E8F5E9
+  BorderColor #999
 }
 
-' 服务器 B
-rectangle "云服务器 B (2C4G)" as B {
-  artifact "loginServer-2\n端口:8002" as ls2
-  artifact "chatServer-1\n端口:8003" as cs1
+' 布局方向
+top to bottom direction
+
+' ======================================
+' 第一层：客户端
+' ======================================
+package "📱 客户端" as CLIENT {
+  actor "游戏客户端" as client
+  artifact "testWS.js" as testws
+  artifact "testHttpApi.js" as testhttp
 }
 
-' 服务器 C
-rectangle "云服务器 C (2C4G)" as C {
-  artifact "loginServer-3\n端口:8004" as ls3
+' ======================================
+' 第二层：Gateway（路由发现，独立进程）
+' ======================================
+package "🔀 Gateway :9000\n路由发现 / 注册中心 / 跨服管理" <<gw>> as GW {
+  rectangle "RoundRobin / Random / Hash" as gw_route
 }
 
-' 客户端 → Gateway
-client --> gw : "① HTTP /gateway/route"
+' ======================================
+' 第三层：应用 Server 集群
+' ======================================
+package "🖥️  应用服务器 (4核8G)" as SERVERS {
 
-' Gateway ←→ 各节点
-gw <--> ls1 : "注册 + 5s 心跳"
-gw <--> ls2 : "注册 + 5s 心跳"
-gw <--> ls3 : "注册 + 5s 心跳"
-gw <--> cs1 : "注册 + 5s 心跳"
+  package "loginServer :8003" <<app>> as LS {
+    rectangle "account.login/register"
+    rectangle "inventory.add/consume"
+  }
 
-' 客户端 → 后端（直连）
-client --> ls1 : "③ WebSocket"
-client --> ls2 : "③ WebSocket"
-client --> ls3 : "③ WebSocket"
-client --> cs1 : "③ WebSocket"
+  package "chatServer :8004" <<app>> as CS {
+    rectangle "chat.world.send"
+    rectangle "chat.private.send"
+    rectangle "chat.group.*"
+  }
 
-' 后端 → MySQL
-ls1 --> mysql
-ls2 --> mysql
-ls3 --> mysql
+  package "apiLoginServer :8005" <<app>> as API {
+    rectangle "HTTP /api/*"
+  }
+}
 
-' 后端 → Redis
-ls1 --> redis
-ls2 --> redis
-ls3 --> redis
-cs1 --> redis
+' ======================================
+' 第四层：数据层
+' ======================================
+package "🗄️  数据层" as DATA {
 
-note right of gw
-  Gateway 只做 HTTP 路由发现
-  无状态，可水平扩容
-end note
+  package "MySQL mssg (主库)\nPoolSize: 300" <<db>> {
+    database "users" as t_user
+    database "user_items" as t_items
+  }
 
-note right of redis
-  Pub/Sub: "node:broadcast"
-  跨节点踢人 / 推送
-end note
+  package "MySQL game_log (日志库)\nPoolSize: 100" <<db>> {
+    database "item_op_log" as t_log
+  }
+
+  package "Redis :6379\nPoolSize: 100" <<cache>> {
+    database "Hash: inventory:{uid}" as r_hash
+    database "Set: dirty:uids" as r_set
+    database "String: sess:{token}" as r_sess
+    database "Pub/Sub: node:broadcast" as r_pub
+  }
+}
+
+' ======================================
+' 后台定时任务（侧边）
+' ======================================
+rectangle "⏱️  后台定时任务 (30s)\n扫描 dirty:uids\n批量 REPLACE INTO user_items\n并发 saveConcurrency=10" as cron #FFF9C4
+
+' ======================================
+' 连接关系（精简！合并同类）
+' ======================================
+
+' ── 客户端 → Gateway (路由发现) ──
+client --> GW : "① HTTP /gateway/route?type=xxx"
+
+' ── Gateway → Server (注册 + 心跳) ──
+GW ..> LS : "rpc.Register()"
+GW ..> CS : "rpc.Register()"
+GW ..> API : "rpc.Register()"
+
+' ── 客户端 → Server (直连业务) ──
+client --> LS : "② WS ws://:8003?token=xxx"
+client --> CS : "② WS ws://:8004?token=xxx"
+testhttp --> API : "HTTP /api/login"
+
+' ── Server → MySQL ──
+LS --> t_user : 账号验证
+LS --> t_items : 道具加载/保存
+API --> t_user
+API --> t_items
+LS ..> t_log : InsertSafe
+API ..> t_log : InsertSafe
+
+' ── Server → Redis ──
+LS --> r_sess : Store/Get token
+LS --> r_hash : Lua 原子道具
+LS --> r_set : SADD dirty:uids
+CS --> r_sess : token 鉴权
+CS --> r_pub : PublishBroadcast
+
+' ── Redis Pub/Sub 跨服同步 ──
+r_pub ..> LS : 订阅广播
+r_pub ..> CS : 订阅广播
+GW ..> r_pub : Admin 广播/踢人
+
+' ── 定时任务 ──
+cron --> r_set : SMEMBERS dirty:uids
+cron --> t_items : REPLACE INTO 批量
+cron ..> t_log : 批量日志
+
+' ======================================
+' 强制布局对齐
+' ======================================
+GW -[hidden]right- cron
+LS -[hidden]- CS
+CS -[hidden]- API
+
+' ======================================
+' 图例
+' ======================================
+legend bottom center
+  ┌─────────────────────────────────────────────────────────┐
+  │  🔵 Server (8003/8004/8005)   🟣 Gateway (9000)         │
+  │  🟧 MySQL mssg / game_log     🟢 Redis                  │
+  │                                                         │
+  │  → 实线 = 同步调用 (DB读写 / Redis原子)                 │
+  │  ╌> 虚线 = 异步/注册/PubSub                             │
+  │                                                         │
+  │  💡 Gateway 无状态，可水平扩容                           │
+  │  💡 道具修改只写 Redis，MySQL 30s 定时落盘                │
+  │  💡 WS ?token=xxx 自动鉴权                               │
+  │  💡 优雅关闭: Broadcast→Close→WaitHandlers→SaveDirty     │
+  └─────────────────────────────────────────────────────────┘
+endlegend
 
 @enduml

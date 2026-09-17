@@ -16,8 +16,15 @@ import (
 	"time"
 )
 
+const redisTimeout = 2 * time.Second
+
+// redisCtx 返回带超时的 context，防止 Redis 网络抖动导致整个游戏阻塞
+func redisCtx() context.Context {
+	ctx, _ := context.WithTimeout(context.Background(), redisTimeout)
+	return ctx
+}
+
 var (
-	ctx        = context.Background()
 	myNodeAddr string // 当前节点的 ws 地址，启动时 SetMyNodeAddr 设一次
 )
 
@@ -36,7 +43,7 @@ func GetUserCache(key string) ([]byte, bool) {
 	if db.RDB == nil {
 		return nil, false
 	}
-	val, err := db.RDB.Get(ctx, key).Bytes()
+	val, err := db.RDB.Get(redisCtx(), key).Bytes()
 	if err != nil {
 		return nil, false
 	}
@@ -48,7 +55,7 @@ func SetUserCache(key string, data []byte) {
 	if db.RDB == nil {
 		return
 	}
-	if err := db.RDB.Set(ctx, key, data, userCacheTTL).Err(); err != nil {
+	if err := db.RDB.Set(redisCtx(), key, data, userCacheTTL).Err(); err != nil {
 		log.Warn("redis SetUserCache failed", "err", err)
 	}
 }
@@ -58,7 +65,7 @@ func DelUserCache(keys ...string) {
 	if db.RDB == nil {
 		return
 	}
-	db.RDB.Del(ctx, keys...)
+	db.RDB.Del(redisCtx(), keys...)
 }
 
 // UserCacheKeyByUsername 按用户名缓存的 key
@@ -89,16 +96,16 @@ func BindUser(uid, nodeAddr string) bool {
 
 	// SETNX 分布式锁：保证同一 uid 不会被两个节点同时绑定
 	lockKey := "lock:bind:" + uid
-	locked, err := db.RDB.SetNX(ctx, lockKey, nodeAddr, 5*time.Second).Result()
+	locked, err := db.RDB.SetNX(redisCtx(), lockKey, nodeAddr, 5*time.Second).Result()
 	if err != nil || !locked {
 		log.Warn("BindUser failed: another node is binding this uid", "uid", uid)
 		return false
 	}
-	defer db.RDB.Del(ctx, lockKey)
+	defer safeDelLock(lockKey)
 
 	// 写入在线位置
 	key := "online:user:" + uid
-	err = db.RDB.Set(ctx, key, nodeAddr, onlineTTL).Err()
+	err = db.RDB.Set(redisCtx(), key, nodeAddr, onlineTTL).Err()
 	if err != nil {
 		log.Warn("BindUser redis Set failed", "err", err)
 		return true
@@ -113,7 +120,7 @@ func UnbindUser(uid string) {
 	if db.RDB == nil {
 		return
 	}
-	db.RDB.Del(ctx, "online:user:"+uid)
+	db.RDB.Del(redisCtx(), "online:user:"+uid)
 	log.Info("[Redis] user unbound", "uid", uid)
 }
 
@@ -122,7 +129,7 @@ func TouchUserHeartbeat(uid, nodeAddr string) {
 	if db.RDB == nil {
 		return
 	}
-	db.RDB.Set(ctx, "online:user:"+uid, nodeAddr, onlineTTL)
+	db.RDB.Set(redisCtx(), "online:user:"+uid, nodeAddr, onlineTTL)
 }
 
 // GetUserNode 查某个 uid 现在在哪个节点
@@ -131,7 +138,7 @@ func GetUserNode(uid string) (string, bool) {
 	if db.RDB == nil {
 		return "", false
 	}
-	node, err := db.RDB.Get(ctx, "online:user:"+uid).Result()
+	node, err := db.RDB.Get(redisCtx(), "online:user:"+uid).Result()
 	if err != nil {
 		return "", false
 	}
@@ -175,7 +182,7 @@ func PublishBroadcast(msg BroadcastMsg) {
 	if err != nil {
 		return
 	}
-	if err := db.RDB.Publish(ctx, ChannelBroadcast, data).Err(); err != nil {
+	if err := db.RDB.Publish(redisCtx(), ChannelBroadcast, data).Err(); err != nil {
 		log.Warn("redis PublishBroadcast failed", "err", err)
 	}
 }
@@ -187,7 +194,7 @@ func SubscribeBroadcast(handler func(BroadcastMsg)) {
 		return
 	}
 
-	sub := db.RDB.Subscribe(ctx, ChannelBroadcast)
+	sub := db.RDB.Subscribe(redisCtx(), ChannelBroadcast)
 	defer sub.Close()
 
 	ch := sub.Channel()
@@ -211,15 +218,32 @@ func TryLock(key string, ttl time.Duration) (func(), bool) {
 		return func() {}, true // 安全降级
 	}
 
-	ok, err := db.RDB.SetNX(ctx, key, "1", ttl).Result()
+	ok, err := db.RDB.SetNX(redisCtx(), key, "1", ttl).Result()
 	if err != nil || !ok {
 		return nil, false
 	}
 
 	unlock := func() {
-		db.RDB.Del(ctx, key)
+		safeDelLock(key)
 	}
 	return unlock, true
+}
+
+// safeDelLock 安全释放分布式锁：Lua 脚本检查锁还存在才 DEL
+// 防止锁 TTL 过期后被其他节点重新获取，本节点误删别人的锁
+func safeDelLock(lockKey string) {
+	if db.RDB == nil {
+		return
+	}
+	// 只用 TTL 判断：TTL > 0 说明锁还没过期（就是我们的），可以删
+	// 如果 TTL == -1（无过期）或 TTL == -2（不存在），跳过
+	const script = `
+		local ttl = redis.call('TTL', KEYS[1])
+		if ttl > 0 then
+			redis.call('DEL', KEYS[1])
+		end
+	`
+	db.RDB.Eval(redisCtx(), script, []string{lockKey})
 }
 
 // ────────────────────────────────────────
@@ -237,7 +261,7 @@ func JoinGroup(groupId, uid string) {
 	if db.RDB == nil {
 		return
 	}
-	if err := db.RDB.SAdd(ctx, groupKey(groupId), uid).Err(); err != nil {
+	if err := db.RDB.SAdd(redisCtx(), groupKey(groupId), uid).Err(); err != nil {
 		log.Warn("redis JoinGroup failed", "group", groupId, "uid", uid, "err", err)
 	}
 }
@@ -247,7 +271,7 @@ func LeaveGroup(groupId, uid string) {
 	if db.RDB == nil {
 		return
 	}
-	if err := db.RDB.SRem(ctx, groupKey(groupId), uid).Err(); err != nil {
+	if err := db.RDB.SRem(redisCtx(), groupKey(groupId), uid).Err(); err != nil {
 		log.Warn("redis LeaveGroup failed", "group", groupId, "uid", uid, "err", err)
 	}
 }
@@ -257,7 +281,7 @@ func GetGroupMembers(groupId string) []string {
 	if db.RDB == nil {
 		return nil
 	}
-	members, err := db.RDB.SMembers(ctx, groupKey(groupId)).Result()
+	members, err := db.RDB.SMembers(redisCtx(), groupKey(groupId)).Result()
 	if err != nil {
 		log.Warn("redis GetGroupMembers failed", "group", groupId, "err", err)
 		return nil
@@ -281,6 +305,7 @@ const (
 
 // Session 会话信息（存在 Redis 里的内容）
 type Session struct {
+	Token    string `json:"-"` // 原始 token（Redis key，不存进 value）
 	UId      string `json:"uid"`
 	Username string `json:"username"`
 }
@@ -304,7 +329,7 @@ func StoreSession(sess Session) (token string, err error) {
 
 	data, _ := json.Marshal(sess)
 	key := "sess:" + token
-	if err := db.RDB.Set(ctx, key, data, sessionTTL).Err(); err != nil {
+	if err := db.RDB.Set(redisCtx(), key, data, sessionTTL).Err(); err != nil {
 		log.Warn("StoreSession redis Set failed", "err", err)
 		return "", err
 	}
@@ -313,11 +338,12 @@ func StoreSession(sess Session) (token string, err error) {
 
 // GetSession 用 token 查会话
 // 返回 (Session, true) 表示找到；(nil, false) 表示 token 无效/过期
+// 返回的 Session.Token 会被填上原始 token（方便调用方登出时用）
 func GetSession(token string) (Session, bool) {
 	if db.RDB == nil || token == "" {
 		return Session{}, false
 	}
-	data, err := db.RDB.Get(ctx, "sess:"+token).Bytes()
+	data, err := db.RDB.Get(redisCtx(), "sess:"+token).Bytes()
 	if err != nil {
 		return Session{}, false
 	}
@@ -325,6 +351,7 @@ func GetSession(token string) (Session, bool) {
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return Session{}, false
 	}
+	sess.Token = token // ✅ 把原始 token 填回去
 	return sess, true
 }
 
@@ -333,7 +360,7 @@ func DelSession(token string) {
 	if db.RDB == nil || token == "" {
 		return
 	}
-	db.RDB.Del(ctx, "sess:"+token)
+	db.RDB.Del(redisCtx(), "sess:"+token)
 }
 
 // IsGroupMember 判断 uid 是否在群组里
@@ -341,7 +368,7 @@ func IsGroupMember(groupId, uid string) bool {
 	if db.RDB == nil {
 		return false
 	}
-	ok, err := db.RDB.SIsMember(ctx, groupKey(groupId), uid).Result()
+	ok, err := db.RDB.SIsMember(redisCtx(), groupKey(groupId), uid).Result()
 	if err != nil {
 		return false
 	}

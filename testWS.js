@@ -36,11 +36,12 @@ const SERVER_PRESETS = {
 const args = process.argv.slice(2);
 
 function parseArgs(argv) {
-    const opts = { server: 'login', username: '', password: '' };
+    const opts = { server: 'login', username: '', password: '', token: '' };
     for (let i = 0; i < argv.length; i++) {
         switch (argv[i]) {
             case '--username': opts.username = argv[++i]; break;
             case '--password': opts.password = argv[++i]; break;
+            case '--token': opts.token = argv[++i]; break;
             default:
                 if (argv[i].startsWith('ws://') || argv[i].startsWith('wss://')) {
                     opts.server = argv[i];
@@ -54,10 +55,18 @@ function parseArgs(argv) {
     return opts;
 }
 
+// 拼 WS URL：如果有 token 参数自动加 ?token=xxx
+function buildWsUrl(presetOrUrl, token) {
+    let url = presetOrUrl.startsWith('ws') ? presetOrUrl : SERVER_PRESETS[presetOrUrl];
+    if (token) {
+        url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+    }
+    return url;
+}
+
 const opts = parseArgs(args);
-const WS_URL = opts.server.startsWith('ws') 
-    ? opts.server 
-    : SERVER_PRESETS[opts.server];
+const WS_URL = buildWsUrl(opts.server, opts.token);
+let savedToken = opts.token; // 保存 token，switch 到 chatServer 时自动带上
 
 // ═══════════════════════════════════════════════
 //  状态
@@ -103,11 +112,21 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
     try {
         const data = JSON.parse(event.data);
-        // 登录响应自动缓存 uid
+        // 登录响应自动缓存 uid + token
         if (data.name === 'account.login' && data.code === 0 && data.msg) {
             currentUId = data.msg.uid || '';
             currentUsername = data.msg.username || '';
-            console.log(`\n🎯 登录成功! UID=${currentUId} Username=${currentUsername}\n`);
+            if (data.msg.token) savedToken = data.msg.token;
+            console.log(`\n🎯 登录成功! UID=${currentUId} Username=${currentUsername} Token=${savedToken ? '(已保存)' : '(无)'} \n`);
+        }
+        // Token 自动鉴权结果（连 chatServer 时收到）
+        else if (data.name === 'auth.ok' && data.msg) {
+            currentUId = data.msg.uid || '';
+            currentUsername = data.msg.username || '';
+            console.log(`\n✅ Token 鉴权成功! UID=${currentUId} Username=${currentUsername}\n`);
+        }
+        else if (data.name === 'auth.fail' && data.msg) {
+            console.log(`\n❌ Token 鉴权失败: ${data.msg.errMsg}\n`);
         }
         console.log(`📥 ← [${data.name}] seq=${data.seq} code=${data.code}`);
         if (data.msg) {
@@ -238,8 +257,26 @@ function startRepl() {
                 send(ws, 'chat.group.send', { groupId: args[0], content: args.slice(1).join(' ') });
                 break;
 
-            case 'online':
-                send(ws, 'chat.online.get', {});
+            case 'switch':
+            case 'connect':
+                // 快速切换到另一个 server（带上已保存的 token）
+                if (args.length < 1) { console.log('用法: switch <login|chat|ws://host:port>'); break; }
+                const newUrl = buildWsUrl(args[0], savedToken);
+                console.log(`🔄 切换到 ${newUrl}`);
+                ws.close();
+                // 重连
+                const newWs = new WebSocket(newUrl);
+                setupWsHandlers(newWs, newUrl);
+                break;
+
+            case 'token':
+                if (args.length < 1) {
+                    if (savedToken) console.log(`当前 token: ${savedToken}`);
+                    else console.log('❌ 还没有 token');
+                    break;
+                }
+                savedToken = args[0];
+                console.log(`✅ token 已保存: ${savedToken}`);
                 break;
 
             // ──── 道具模块 ────

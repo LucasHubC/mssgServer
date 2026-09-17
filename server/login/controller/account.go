@@ -12,6 +12,8 @@ import (
 	"mssgServer/server/login/proto"
 	"net/http"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 var DefaultAccount = &Account{}
@@ -68,7 +70,7 @@ func (a *Account) login(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "用户不存在"}
 		return
 	}
-	if user.Password != body.Password {
+	if err := verifyPassword(user.Password, body.Password); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "密码错误"}
 		return
@@ -94,9 +96,18 @@ func (a *Account) login(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		log.Info("inventory loaded on login", "uid", user.UId, "items", len(items))
 	}
 
+	// ✅ 登录成功：签发 token 存 Redis（用于跨 Server 连接鉴权，比如 chatServer 的 ws://host:8004?token=xxx）
+	token, err := rediscache.StoreSession(rediscache.Session{
+		UId:      user.UId,
+		Username: user.Username,
+	})
+	if err != nil {
+		log.Warn("StoreSession failed", "err", err, "uid", user.UId)
+	}
+
 	rsp.Body.Msg = &proto.LoginResp{
 		Username: user.Username,
-		Session:  "sess_" + user.UId,
+		Token:    token,
 		UId:      user.UId,
 	}
 }
@@ -146,7 +157,7 @@ func (a *Account) register(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	u := &dao.User{
 		UId:      genUId(),
 		Username: body.Username,
-		Password: body.Password, // 🟡 后面改成 bcrypt 哈希
+		Password: hashPassword(body.Password),
 	}
 
 	// ④ 入库
@@ -172,7 +183,7 @@ func (a *Account) register(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 // HTTP 短连接登录：成功后只返回 JSON，不绑定连接（因为 HTTP 请求完就断了）
 func (a *Account) loginHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		net.WriteBadRequest(w, "method not allowed")
 		return
 	}
 
@@ -192,7 +203,7 @@ func (a *Account) loginHttp(w http.ResponseWriter, r *http.Request) {
 		net.WriteNotFound(w, "用户不存在")
 		return
 	}
-	if user.Password != body.Password {
+	if err := verifyPassword(user.Password, body.Password); err != nil {
 		net.WriteUnauthorized(w, "密码错误")
 		return
 	}
@@ -230,7 +241,7 @@ func (a *Account) loginHttp(w http.ResponseWriter, r *http.Request) {
 // registerHttp POST /api/register
 func (a *Account) registerHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		net.WriteBadRequest(w, "method not allowed")
 		return
 	}
 
@@ -269,7 +280,7 @@ func (a *Account) registerHttp(w http.ResponseWriter, r *http.Request) {
 	u := &dao.User{
 		UId:      genUId(),
 		Username: body.Username,
-		Password: body.Password,
+		Password: hashPassword(body.Password),
 	}
 	if _, err := dao.UserDAO.Create(u); err != nil {
 		log.Error("registerHttp create failed", "err", err)
@@ -290,7 +301,7 @@ func (a *Account) registerHttp(w http.ResponseWriter, r *http.Request) {
 // userInfoHttp GET /api/user/{uid}
 func (a *Account) userInfoHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		net.WriteBadRequest(w, "method not allowed")
 		return
 	}
 
@@ -330,7 +341,7 @@ func (a *Account) userInfoHttp(w http.ResponseWriter, r *http.Request) {
 // meHttp GET /api/me —— 获取当前登录用户信息（必须带 token）
 func (a *Account) meHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		net.WriteBadRequest(w, "method not allowed")
 		return
 	}
 
@@ -352,7 +363,7 @@ func (a *Account) meHttp(w http.ResponseWriter, r *http.Request) {
 // logoutHttp POST /api/logout —— 登出，销毁 token
 func (a *Account) logoutHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"code":-1,"errMsg":"method not allowed"}`, http.StatusMethodNotAllowed)
+		net.WriteBadRequest(w, "method not allowed")
 		return
 	}
 
@@ -372,4 +383,20 @@ func genUId() string {
 	b := make([]byte, 6)
 	rand.Read(b)
 	return "test_" + hex.EncodeToString(b)
+}
+
+// hashPassword 用 bcrypt 哈希密码（注册时调）
+func hashPassword(password string) string {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		// 理论上不会发生（DefaultCost=10，成本很低），万一出错回退存原文
+		log.Warn("bcrypt hash failed, fallback to plaintext", "err", err)
+		return password
+	}
+	return string(hashed)
+}
+
+// verifyPassword 比对密码（登录时调）
+func verifyPassword(hashed, input string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(input))
 }
