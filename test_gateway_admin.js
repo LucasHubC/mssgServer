@@ -16,7 +16,7 @@ const http = require('http');
 const GATEWAY = { host: '127.0.0.1', port: 9000 };
 
 // ⚠️ 把这里改成你 testWS.js 登录的 uid（push 和 kick 测试会用到）
-const TARGET_UID = 'test_uid_abc_1234567890';
+const TARGET_UID = 'test_a9c2f7853c7c';
 
 // ────────────────────────────────────────
 //  通用 HTTP POST / GET

@@ -50,19 +50,24 @@ func (cm *ConnectionManager) Register(ws *WSServer) bool {
 }
 
 // Unregister 注销连接，同时解绑 uid + 清理 Redis 在线状态
+// 整个函数只做一次 Lock/Unlock，避免 unlock→IO→lock 之间状态被篡改
 func (cm *ConnectionManager) Unregister(ws *WSServer) {
+	var uidToUnbind string
 	cm.mu.Lock()
 	delete(cm.conns, ws)
 	uidVal, _ := ws.GetProperty("uid")
 	if uidStr, ok := uidVal.(string); ok && uidStr != "" {
 		if cur, exists := cm.uidMap[uidStr]; exists && cur == ws {
 			delete(cm.uidMap, uidStr)
-			cm.mu.Unlock()
-			rediscache.UnbindUser(uidStr)
-			cm.mu.Lock()
+			uidToUnbind = uidStr
 		}
 	}
 	cm.mu.Unlock()
+
+	// Redis IO 移到锁外，避免阻塞 cm.mu
+	if uidToUnbind != "" {
+		rediscache.UnbindUser(uidToUnbind)
+	}
 	atomic.AddInt64(&cm.total, -1)
 }
 
@@ -186,6 +191,28 @@ func (cm *ConnectionManager) All() []*WSServer {
 	return list
 }
 
+// PushToLocalGroupMembers 推给本节点上属于该群组的所有成员
+// （BroadcastAll 模式：先本机推，再 PublishBroadcast 给其他节点）
+func (cm *ConnectionManager) PushToLocalGroupMembers(groupId, name string, data interface{}) {
+	cm.pushToLocalUids(rediscache.GetGroupMembers(groupId), name, data)
+}
+
+// PushToLocalRoomMembers 推给本节点上属于该房间的所有成员
+func (cm *ConnectionManager) PushToLocalRoomMembers(roomId, name string, data interface{}) {
+	cm.pushToLocalUids(rediscache.GetRoomMembers(roomId), name, data)
+}
+
+// pushToLocalUids 通用：推给本机上指定的一组 uid（group/room 广播共用）
+func (cm *ConnectionManager) pushToLocalUids(uids []string, name string, data interface{}) {
+	cm.mu.RLock()
+	for _, uid := range uids {
+		if ws := cm.uidMap[uid]; ws != nil {
+			ws.Push(name, data)
+		}
+	}
+	cm.mu.RUnlock()
+}
+
 // OnlineUids 当前已登录用户的 uid 列表
 // 比 All() 后遍历 GetProperty 高效得多（直接读 uidMap）
 func (cm *ConnectionManager) OnlineUids() []string {
@@ -214,29 +241,31 @@ func (cm *ConnectionManager) SubscribeRemoteBroadcast() {
 		switch msg.Action {
 		case "kick":
 			if ws := cm.GetByUid(msg.UID); ws != nil {
-				log.Info("[Redis] remote kick received", "uid", msg.UID, "from", msg.FromNode)
+				log.Debug("[Redis] remote kick received", "uid", msg.UID, "from", msg.FromNode)
 				go ws.Close()
 			}
 
 		case "push":
 			if ws := cm.GetByUid(msg.UID); ws != nil {
-				log.Info("[Redis] remote push received", "uid", msg.UID, "name", msg.Name, "from", msg.FromNode)
+				log.Debug("[Redis] remote push received", "uid", msg.UID, "name", msg.Name, "from", msg.FromNode)
 				ws.Push(msg.Name, msg.Data)
 			}
 
 		case "broadcast":
-			log.Info("[Redis] remote broadcast received", "name", msg.Name, "from", msg.FromNode)
+			log.Debug("[Redis] remote broadcast received", "name", msg.Name, "from", msg.FromNode)
 			cm.Broadcast(msg.Name, msg.Data)
 
 		case "group":
 			// msg.UID 字段在这里复用为 groupId
 			groupIds := rediscache.GetGroupMembers(msg.UID)
-			log.Info("[Redis] remote group msg", "group", msg.UID, "members", len(groupIds), "from", msg.FromNode)
-			for _, uid := range groupIds {
-				if ws := cm.GetByUid(uid); ws != nil {
-					ws.Push(msg.Name, msg.Data)
-				}
-			}
+			log.Debug("[Redis] remote group msg", "group", msg.UID, "members", len(groupIds), "from", msg.FromNode)
+			cm.pushToLocalUids(groupIds, msg.Name, msg.Data)
+
+		case "room":
+			// msg.UID 字段在这里复用为 roomId
+			roomMembers := rediscache.GetRoomMembers(msg.UID)
+			log.Debug("[Redis] remote room msg", "room", msg.UID, "members", len(roomMembers), "from", msg.FromNode)
+			cm.pushToLocalUids(roomMembers, msg.Name, msg.Data)
 
 		default:
 			log.Warn("[Redis] unknown broadcast action", "action", msg.Action)

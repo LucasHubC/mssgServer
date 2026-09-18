@@ -11,12 +11,17 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"mssgServer/config/db"
 	"mssgServer/infra/log"
+	"strconv"
 	"time"
 )
 
-const redisTimeout = 2 * time.Second
+const (
+	redisTimeout = 2 * time.Second
+	bindLockTTL  = 5 * time.Second // BindUser 分布式锁 TTL
+)
 
 // redisCtx 返回带超时的 context，防止 Redis 网络抖动导致整个游戏阻塞
 func redisCtx() context.Context {
@@ -84,8 +89,15 @@ func UserCacheKeyByUid(uid string) string {
 // ────────────────────────────────────────
 
 const (
-	onlineTTL = 30 * time.Second // 在线状态 30s 过期，心跳续期
+	onlineTTL          = 30 * time.Second // 在线状态 30s 过期，心跳续期
+	defaultMaxRoomSize = 10               // max_size 解析失败时的默认值
 )
+
+// onlineKey 用户在线状态 Redis key
+func onlineKey(uid string) string { return "online:user:" + uid }
+
+// bindLockKey BindUser 分布式锁 key
+func bindLockKey(uid string) string { return "lock:bind:" + uid }
 
 // BindUser 将 uid 绑定到当前节点（登录成功时调用）
 // 返回 true 表示绑定成功，false 表示被分布式锁拦住（另一个节点正在处理这个用户）
@@ -95,8 +107,8 @@ func BindUser(uid, nodeAddr string) bool {
 	}
 
 	// SETNX 分布式锁：保证同一 uid 不会被两个节点同时绑定
-	lockKey := "lock:bind:" + uid
-	locked, err := db.RDB.SetNX(redisCtx(), lockKey, nodeAddr, 5*time.Second).Result()
+	lockKey := bindLockKey(uid)
+	locked, err := db.RDB.SetNX(redisCtx(), lockKey, nodeAddr, bindLockTTL).Result()
 	if err != nil || !locked {
 		log.Warn("BindUser failed: another node is binding this uid", "uid", uid)
 		return false
@@ -104,11 +116,12 @@ func BindUser(uid, nodeAddr string) bool {
 	defer safeDelLock(lockKey)
 
 	// 写入在线位置
-	key := "online:user:" + uid
-	err = db.RDB.Set(redisCtx(), key, nodeAddr, onlineTTL).Err()
+	err = db.RDB.Set(redisCtx(), onlineKey(uid), nodeAddr, onlineTTL).Err()
 	if err != nil {
-		log.Warn("BindUser redis Set failed", "err", err)
-		return true
+		// 🔴 P1 FIX：锁拿了但写在线位置失败 → 返回 false
+		// 否则本节点认为绑定成功，但其他节点查 Redis 找不到路由
+		log.Error("BindUser redis Set failed", "uid", uid, "node", nodeAddr, "err", err)
+		return false
 	}
 
 	log.Info("[Redis] user bound", "uid", uid, "node", nodeAddr)
@@ -120,7 +133,7 @@ func UnbindUser(uid string) {
 	if db.RDB == nil {
 		return
 	}
-	db.RDB.Del(redisCtx(), "online:user:"+uid)
+	db.RDB.Del(redisCtx(), onlineKey(uid))
 	log.Info("[Redis] user unbound", "uid", uid)
 }
 
@@ -129,7 +142,7 @@ func TouchUserHeartbeat(uid, nodeAddr string) {
 	if db.RDB == nil {
 		return
 	}
-	db.RDB.Set(redisCtx(), "online:user:"+uid, nodeAddr, onlineTTL)
+	db.RDB.Set(redisCtx(), onlineKey(uid), nodeAddr, onlineTTL)
 }
 
 // GetUserNode 查某个 uid 现在在哪个节点
@@ -138,7 +151,7 @@ func GetUserNode(uid string) (string, bool) {
 	if db.RDB == nil {
 		return "", false
 	}
-	node, err := db.RDB.Get(redisCtx(), "online:user:"+uid).Result()
+	node, err := db.RDB.Get(redisCtx(), onlineKey(uid)).Result()
 	if err != nil {
 		return "", false
 	}
@@ -373,4 +386,235 @@ func IsGroupMember(groupId, uid string) bool {
 		return false
 	}
 	return ok
+}
+
+// ────────────────────────────────────────
+//  房间相关错误（供 controller switch 判断）
+// ────────────────────────────────────────
+
+var (
+	ErrRoomNotFound   = errors.New("room not found")
+	ErrRoomExists     = errors.New("room already exists")
+	ErrRoomFull       = errors.New("room is full")
+	ErrNotRoomOwner   = errors.New("not room owner")
+	ErrCannotKickSelf = errors.New("cannot kick self")
+)
+
+// ────────────────────────────────────────
+//  房间管理（Redis Hash + Set + ZSet）
+//
+//  key 设计：
+//   room:info:{roomId}   → Hash{name, owner, max_size, created_at}
+//   room:members:{roomId} → Set<uid>
+//   room:user:{uid}      → ZSet(roomId → created_at)  记录用户加入过的房间
+//   room:list            → ZSet(roomId → created_at)  房间列表（可分页）
+// ────────────────────────────────────────
+
+const (
+	roomInfoKey    = "room:info:"
+	roomMembersKey = "room:members:"
+	roomUserKey    = "room:user:"
+	roomListKey    = "room:list"
+)
+
+// RoomRedis 房间数据结构（Hash 用）
+type RoomRedis struct {
+	Name      string `json:"name"`
+	Owner     string `json:"owner"`
+	MaxSize   int    `json:"max_size"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// CreateRoom 创建房间
+// 返回生成的 roomId
+func CreateRoom(roomId, name, owner string, maxSize int) error {
+	if db.RDB == nil {
+		return nil
+	}
+	now := time.Now().Unix()
+
+	// 用 Lua 脚本保证原子性：检查 roomId 不存在才创建
+	const script = `
+		if redis.call('EXISTS', KEYS[1]) == 1 then
+			return -1
+		end
+		redis.call('HSET', KEYS[1], 'name', ARGV[1], 'owner', ARGV[2], 'max_size', ARGV[3], 'created_at', ARGV[4])
+		redis.call('SADD', KEYS[2], ARGV[2])
+		redis.call('ZADD', KEYS[3], ARGV[4], ARGV[5])
+		redis.call('ZADD', KEYS[4], ARGV[4], ARGV[5])
+		return 1
+	`
+	res, err := db.RDB.Eval(redisCtx(), script,
+		[]string{roomInfoKey + roomId, roomMembersKey + roomId, roomListKey, roomUserKey + owner},
+		name, owner, maxSize, now, roomId,
+	).Int()
+	if err != nil {
+		return err
+	}
+	if res == -1 {
+		return ErrRoomExists
+	}
+	return nil
+}
+
+// GetRoomInfo 获取房间信息
+// 返回 (nil, ErrRoomNotFound) 表示房间不存在，(nil, error) 表示 Redis 异常
+func GetRoomInfo(roomId string) (*RoomRedis, error) {
+	if db.RDB == nil {
+		return nil, nil
+	}
+	data, err := db.RDB.HGetAll(redisCtx(), roomInfoKey+roomId).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, ErrRoomNotFound
+	}
+	r := &RoomRedis{
+		Name:  data["name"],
+		Owner: data["owner"],
+	}
+	// 🔴 P1 FIX：max_size 解析失败给默认值 10，避免 JoinRoom Lua 里 max==0 跳过满员检查
+	if n, err := strconv.Atoi(data["max_size"]); err == nil && n > 0 {
+		r.MaxSize = n
+	} else {
+		r.MaxSize = defaultMaxRoomSize
+	}
+	return r, nil
+}
+
+// RoomSize 获取房间成员数量
+func RoomSize(roomId string) int {
+	if db.RDB == nil {
+		return 0
+	}
+	n, _ := db.RDB.SCard(redisCtx(), roomMembersKey+roomId).Result()
+	return int(n)
+}
+
+// IsRoomMember 判断 uid 是否是房间成员
+func IsRoomMember(roomId, uid string) bool {
+	if db.RDB == nil {
+		return false
+	}
+	ok, _ := db.RDB.SIsMember(redisCtx(), roomMembersKey+roomId, uid).Result()
+	return ok
+}
+
+// JoinRoom 加入房间（全 Lua 原子：存在性 + 满员 + 加入）
+// 返回错误信息；nil 表示成功
+func JoinRoom(roomId, uid string) error {
+	if db.RDB == nil {
+		return nil
+	}
+
+	// Lua: 检查房间存在 → 检查房间信息 → 检查当前人数 < max_size → 加入
+	// 返回 1=成功, -1=房间不存在, -2=房间已满
+	const script = `
+		if redis.call('EXISTS', KEYS[1]) == 0 then
+			return -1
+		end
+		local max = tonumber(redis.call('HGET', KEYS[1], 'max_size') or '0')
+		if max > 0 and tonumber(redis.call('SCARD', KEYS[2])) >= max then
+			return -2
+		end
+		redis.call('SADD', KEYS[2], ARGV[1])
+		redis.call('ZADD', KEYS[3], ARGV[2], ARGV[3])
+		return 1
+	`
+	res, err := db.RDB.Eval(redisCtx(), script,
+		[]string{roomInfoKey + roomId, roomMembersKey + roomId, roomUserKey + uid},
+		uid, time.Now().Unix(), roomId,
+	).Int()
+	if err != nil {
+		return err
+	}
+	switch res {
+	case -1:
+		return ErrRoomNotFound
+	case -2:
+		return ErrRoomFull
+	default:
+		return nil
+	}
+}
+
+// LeaveRoom 离开房间
+func LeaveRoom(roomId, uid string) {
+	if db.RDB == nil {
+		return
+	}
+	db.RDB.SRem(redisCtx(), roomMembersKey+roomId, uid)
+	db.RDB.ZRem(redisCtx(), roomUserKey+uid, roomId)
+}
+
+// KickFromRoom 踢出房间成员（由房主调用）
+func KickFromRoom(roomId, ownerUid, targetUid string) error {
+	if db.RDB == nil {
+		return nil
+	}
+
+	info, err := GetRoomInfo(roomId)
+	if err != nil {
+		return err
+	}
+	if info == nil {
+		return ErrRoomNotFound
+	}
+	if info.Owner != ownerUid {
+		return ErrNotRoomOwner
+	}
+	if info.Owner == targetUid {
+		return ErrCannotKickSelf
+	}
+
+	LeaveRoom(roomId, targetUid)
+	return nil
+}
+
+// DeleteRoom 删除房间（由房主调用，踢出所有人）
+func DeleteRoom(roomId, ownerUid string) error {
+	if db.RDB == nil {
+		return nil
+	}
+
+	info, err := GetRoomInfo(roomId)
+	if err != nil {
+		return err
+	}
+	if info == nil {
+		return ErrRoomNotFound
+	}
+	if info.Owner != ownerUid {
+		return ErrNotRoomOwner
+	}
+
+	// 原子删除：用 KEYS 传递 roomUserKey 前缀，避免硬编码
+	const script = `
+		local members = redis.call('SMEMBERS', KEYS[2])
+		for i=1,#members do
+			redis.call('ZREM', KEYS[4]..members[i], ARGV[1])
+		end
+		redis.call('DEL', KEYS[1])
+		redis.call('DEL', KEYS[2])
+		redis.call('ZREM', KEYS[3], ARGV[1])
+		return 1
+	`
+	_, err = db.RDB.Eval(redisCtx(), script,
+		[]string{roomInfoKey + roomId, roomMembersKey + roomId, roomListKey, roomUserKey},
+		roomId,
+	).Int()
+	return err
+}
+
+// GetRoomMembers 获取房间所有成员 uid
+func GetRoomMembers(roomId string) []string {
+	if db.RDB == nil {
+		return nil
+	}
+	members, err := db.RDB.SMembers(redisCtx(), roomMembersKey+roomId).Result()
+	if err != nil {
+		return nil
+	}
+	return members
 }

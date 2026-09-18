@@ -1,10 +1,9 @@
 package controller
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"mssgServer/infra/log"
 	rediscache "mssgServer/infra/redis"
+	"mssgServer/infra/util"
 	"mssgServer/net"
 	"mssgServer/server/chat/proto"
 	"strings"
@@ -147,6 +146,11 @@ func (c *Chat) sendGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		return
 	}
 
+	if body.GroupId == "" {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "group_id 不能为空"}
+		return
+	}
 	// 只有群成员才能发
 	if !rediscache.IsGroupMember(body.GroupId, uid) {
 		rsp.Body.Code = -1
@@ -165,19 +169,14 @@ func (c *Chat) sendGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 
 	log.Info("[Chat] group", "from", username, "group", body.GroupId, "msgId", msg.MsgId)
 
-	// 发布到 Redis，SubscribeRemoteBroadcast 里 "group" case 会推给群内所有成员
-	// （包括本机 + 其他节点的）
+	// BroadcastAll 模式：先推本机组员（含自己），再广播其他节点
+	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "chat.group.new", msg)
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
 		Action: "group",
 		UID:    body.GroupId,
 		Name:   "chat.group.new",
 		Data:   msg,
 	})
-
-	// 🔵 给自己也推一份（因为 FromNode=自己，SubscribeRemoteBroadcast 会跳过）
-	if ws, ok := req.Conn.(*net.WSServer); ok {
-		ws.Push("chat.group.new", msg)
-	}
 
 	rsp.Body.Code = 0
 	rsp.Body.Msg = map[string]string{"msgId": msg.MsgId}
@@ -195,17 +194,36 @@ func (c *Chat) joinGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	uid := net.GetUid(req.Conn)
+	uid, username := net.GetAuthInfo(req.Conn)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
 		return
 	}
 
+	if body.GroupId == "" {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "group_id 不能为空"}
+		return
+	}
 	rediscache.JoinGroup(body.GroupId, uid)
 	log.Info("[Chat] join group", "uid", uid, "group", body.GroupId)
 
 	members := rediscache.GetGroupMembers(body.GroupId)
+
+	// BroadcastAll 模式：先推本机组员（含自己，因为 JoinGroup 已写入 Redis），再广播其他节点
+	notice := map[string]any{
+		"type":     "user_joined",
+		"groupId":  body.GroupId,
+		"uid":      uid,
+		"username": username,
+		"members":  members,
+	}
+	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "group.notice", notice)
+	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
+		Action: "group", UID: body.GroupId, Name: "group.notice", Data: notice,
+	})
+
 	rsp.Body.Code = 0
 	rsp.Body.Msg = &proto.GroupMemberResp{
 		GroupId: body.GroupId,
@@ -226,15 +244,34 @@ func (c *Chat) leaveGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	uid := net.GetUid(req.Conn)
+	uid, username := net.GetAuthInfo(req.Conn)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
 		return
 	}
 
+	if body.GroupId == "" {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "group_id 不能为空"}
+		return
+	}
 	rediscache.LeaveGroup(body.GroupId, uid)
 	log.Info("[Chat] leave group", "uid", uid, "group", body.GroupId)
+
+	// BroadcastAll 模式：LeaveGroup 已从 Redis 移除自己，
+	// PushToLocalGroupMembers 只会推给剩下的人（不会推给自己，正好符合预期）
+	notice := map[string]any{
+		"type":     "user_left",
+		"groupId":  body.GroupId,
+		"uid":      uid,
+		"username": username,
+		"members":  rediscache.GetGroupMembers(body.GroupId),
+	}
+	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "group.notice", notice)
+	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
+		Action: "group", UID: body.GroupId, Name: "group.notice", Data: notice,
+	})
 
 	rsp.Body.Code = 0
 	rsp.Body.Msg = map[string]string{"msg": "ok"}
@@ -250,6 +287,11 @@ func (c *Chat) getGroupMembers(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
+		return
+	}
+	if body.GroupId == "" {
+		rsp.Body.Code = -1
+		rsp.Body.Msg = map[string]string{"errMsg": "group_id 不能为空"}
 		return
 	}
 	members := rediscache.GetGroupMembers(body.GroupId)
@@ -276,11 +318,8 @@ func (c *Chat) getOnline(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 //  工具函数
 // ────────────────────────────────────────
 
-func genMsgId() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}
+// genMsgId 生成消息 ID（8 字节 = 16 位 hex）
+func genMsgId() string { return util.RandomHex(8) }
 
 func truncate(s string, n int) string {
 	if len(s) <= n {
