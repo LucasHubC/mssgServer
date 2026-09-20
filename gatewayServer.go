@@ -39,11 +39,15 @@ func main() {
 	http.HandleFunc("/admin/push", gtw.HandleAdminPush)
 	http.HandleFunc("/admin/kick", gtw.HandleAdminKick)
 
+	// ──── WS 智能路由代理（客户端永远只连这个地址）────
+	http.HandleFunc("/ws", gtw.HandleWSProxy)
+
 	// 启动清理协程
 	go gtw.CleanupLoop()
 
 	addr := host + ":" + port
 	log.Info("[Gateway] starting on", addr, "policy=", policy)
+	log.Info("[Gateway] WS proxy:  ws://" + addr + "/ws?token=xxx")
 	log.Info("[Gateway] admin APIs: /admin/broadcast, /admin/push, /admin/kick")
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal("[Gateway] listen failed", "err", err)

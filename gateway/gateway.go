@@ -7,9 +7,13 @@ import (
 	rediscache "mssgServer/infra/redis"
 	"mssgServer/infra/rpc"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // Gateway 网关注册中心 + 路由分发
@@ -244,7 +248,7 @@ func (g *Gateway) HandleAdminPush(w http.ResponseWriter, r *http.Request) {
 
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
 		Action: "push",
-		UID:    req.UID,
+		Target: req.UID,
 		Name:   req.Name,
 		Data:   req.Data,
 	})
@@ -273,10 +277,194 @@ func (g *Gateway) HandleAdminKick(w http.ResponseWriter, r *http.Request) {
 
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
 		Action: "kick",
-		UID:    req.UID,
+		Target: req.UID,
 	})
 
 	log.Info("[Gateway] admin kick", "uid", req.UID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "msg": "ok"})
+}
+
+// ═══════════════════════════════════════════════════════════
+//  WS 智能路由代理 —— 客户端永远只连 Gateway 一个 WS 连接
+//  按消息 name 前缀实时路由到对应后端节点
+// ═══════════════════════════════════════════════════════════
+
+var wsProxyUpgrader = websocket.Upgrader{
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
+	CheckOrigin:     func(r *http.Request) bool { return true },
+}
+
+// msgRouteRules 消息 name 前缀 → node type
+var msgRouteRules = []struct {
+	prefix   string
+	nodeType string
+}{
+	{"account.", "login"},
+	{"inventory.", "login"},
+	{"room.", "room"},
+	{"chat.", "chat"},
+	{"group.", "chat"},
+}
+
+func routeByName(name string) string {
+	for _, r := range msgRouteRules {
+		if strings.HasPrefix(name, r.prefix) {
+			return r.nodeType
+		}
+	}
+	return "login"
+}
+
+var activeProxyConns int64
+
+// ActiveProxyConns 当前活跃的 WS 代理连接数
+func ActiveProxyConns() int64 { return atomic.LoadInt64(&activeProxyConns) }
+
+// HandleWSProxy 智能 WS 代理入口
+// 客户端: ws://gateway:9000/ws?token=xxx
+// 所有消息按 name 前缀实时路由到 login/chat/room 后端节点
+func (g *Gateway) HandleWSProxy(w http.ResponseWriter, r *http.Request) {
+	// ① Upgrade 客户端连接
+	clientWS, err := wsProxyUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Warn("[Gateway] WS upgrade failed", "err", err)
+		return
+	}
+	atomic.AddInt64(&activeProxyConns, 1)
+	defer atomic.AddInt64(&activeProxyConns, -1)
+	defer clientWS.Close()
+
+	// ② 收集 query 参数
+	query := r.URL.Query()
+	token := query.Get("token")
+
+	// ③ 为每种 nodeType 各 Route 一个后端节点（负载均衡！）
+	nodeTypes := []string{"login", "chat", "room"}
+	backendConns := make(map[string]*websocket.Conn)
+
+	for _, nt := range nodeTypes {
+		routeResp := g.Route(rpc.RouteReq{Type: nt})
+		if routeResp.Code != 0 {
+			log.Warn("[Gateway] no alive node for type", "type", nt)
+			continue
+		}
+		backendWS, err := dialBackend(routeResp.Addr, token)
+		if err != nil {
+			log.Warn("[Gateway] dial backend failed", "type", nt, "addr", routeResp.Addr, "err", err)
+			continue
+		}
+		backendConns[nt] = backendWS
+		defer backendWS.Close()
+	}
+
+	if len(backendConns) == 0 {
+		log.Warn("[Gateway] no backend available, close client conn")
+		return
+	}
+
+	log.Info("[Gateway] WS proxy connected", "backendTypes", fmt.Sprintf("%v", mapKeys(backendConns)))
+
+	// ④ 双向转发
+	go proxyClientToBackend(clientWS, backendConns)
+	proxyBackendToClient(clientWS, backendConns)
+}
+
+func mapKeys(m map[string]*websocket.Conn) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// dialBackend 连后端 WS 节点，透传 token 参数
+func dialBackend(addr, token string) (*websocket.Conn, error) {
+	parsed, err := url.Parse(addr)
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
+		q := parsed.Query()
+		q.Set("token", token)
+		parsed.RawQuery = q.Encode()
+	}
+	c, _, err := websocket.DefaultDialer.Dial(parsed.String(), nil)
+	return c, err
+}
+
+// proxyClientToBackend 客户端 → Gateway → 后端
+func proxyClientToBackend(client *websocket.Conn, backends map[string]*websocket.Conn) {
+	for {
+		_, data, err := client.ReadMessage()
+		if err != nil {
+			return // 客户端断开
+		}
+
+		// 解析 name 字段
+		var env struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(data, &env); err != nil {
+			continue
+		}
+
+		// 按 name 前缀选后端类型
+		nodeType := routeByName(env.Name)
+		backend, ok := backends[nodeType]
+		if !ok {
+			continue
+		}
+
+		backend.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+// proxyBackendToClient 后端 → Gateway → 客户端
+func proxyBackendToClient(client *websocket.Conn, backends map[string]*websocket.Conn) {
+	// 从所有 backend 并发读，谁先有数据就发给客户端
+	type msgWithSource struct {
+		data []byte
+	}
+
+	channels := make([]<-chan msgWithSource, 0, len(backends))
+	for _, b := range backends {
+		ch := make(chan msgWithSource, 32)
+		go func(ws *websocket.Conn, c chan<- msgWithSource) {
+			defer close(c)
+			for {
+				_, data, err := ws.ReadMessage()
+				if err != nil {
+					return
+				}
+				c <- msgWithSource{data: data}
+			}
+		}(b, ch)
+		channels = append(channels, ch)
+	}
+
+	// 简单 fan-in：从所有 channel 接收，任一关闭则退出
+	for {
+		var gotOne bool
+		for _, ch := range channels {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return // 后端断开，整条链路关
+				}
+				if err := client.WriteMessage(websocket.TextMessage, msg.data); err != nil {
+					return
+				}
+				gotOne = true
+			default:
+			}
+		}
+		if !gotOne {
+			// 短暂无数据，避免空转
+			select {
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
 }

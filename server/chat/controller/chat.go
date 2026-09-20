@@ -173,7 +173,7 @@ func (c *Chat) sendGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "chat.group.new", msg)
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
 		Action: "group",
-		UID:    body.GroupId,
+		Target: body.GroupId,
 		Name:   "chat.group.new",
 		Data:   msg,
 	})
@@ -221,7 +221,7 @@ func (c *Chat) joinGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	}
 	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "group.notice", notice)
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
-		Action: "group", UID: body.GroupId, Name: "group.notice", Data: notice,
+		Action: "group", Target: body.GroupId, Name: "group.notice", Data: notice,
 	})
 
 	rsp.Body.Code = 0
@@ -270,7 +270,7 @@ func (c *Chat) leaveGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	}
 	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "group.notice", notice)
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
-		Action: "group", UID: body.GroupId, Name: "group.notice", Data: notice,
+		Action: "group", Target: body.GroupId, Name: "group.notice", Data: notice,
 	})
 
 	rsp.Body.Code = 0

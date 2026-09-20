@@ -32,6 +32,17 @@ func main() {
 
 	rediscache.SetMyNodeAddr(nodeAddr)
 	go net.ConnManager.SubscribeRemoteBroadcast()
+	go net.ConnManager.StartHeartbeatLoop()
+
+	// ✅ 初始化跨服 RPC 模块（Redis Stream + Pub/Sub）
+	rpc.Init(nodeAddr)
+	// 注册本节点能响应的 RPC 方法
+	rpc.Handle("get_online_count", func(p map[string]any) (any, error) {
+		return net.ConnManager.Total(), nil
+	})
+	rpc.Handle("ping", func(p map[string]any) (any, error) {
+		return "pong", nil
+	})
 
 	s := net.NewServer(host + ":" + port)
 	s.SetNodeAddr(nodeAddr)
@@ -99,7 +110,10 @@ func gracefulShutdown(done chan struct{}) {
 	}
 	wg.Wait()
 
-	// ③ 等所有正在执行的 handler 跑完
+	// ③ 停掉 RPC 模块（不再响应新请求）
+	rpc.Close()
+
+	// ④ 等所有正在执行的 handler 跑完
 	log.Info("[ChatServer] waiting handlers to finish...")
 	net.WaitHandlers()
 

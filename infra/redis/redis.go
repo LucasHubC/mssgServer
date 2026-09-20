@@ -175,13 +175,28 @@ func GetMyNodeAddr() string {
 	return myNodeAddr
 }
 
-// BroadcastMsg 广播消息体
+// BroadcastMsg 跨服广播消息体
+//
+// 字段说明：
+//
+//	Action  —— 消息类型，决定 Target 是什么
+//	  "kick"     → Target = 被踢的 uid
+//	  "push"     → Target = 推送目标 uid
+//	  "broadcast"→ Target = ""  (全服广播，不需要目标)
+//	  "group"    → Target = 目标群组 groupId
+//	  "room"     → Target = 目标房间 roomId
+//	Target  —— 目标标识（一个字符串承载，因为 Action 已经说明了它是谁）
+//	Name    —— 业务事件名（如 "room.chat.new"）
+//	Data    —— 业务消息体（会被序列化为 JSON）
+//	FromNode —— 发送节点地址（PublishBroadcast 自动填，接收方用来跳过自己发的）
+//	TraceId —— 链路追踪 ID（可选，方便排查跨服消息丢失）
 type BroadcastMsg struct {
-	Action   string      `json:"action"` // "kick" | "push" | "broadcast"
-	UID      string      `json:"uid,omitempty"`
+	Action   string      `json:"action"`
+	Target   string      `json:"target,omitempty"`
 	Name     string      `json:"name,omitempty"`
 	Data     interface{} `json:"data,omitempty"`
-	FromNode string      `json:"from_node,omitempty"` // 发送节点地址（自动填）
+	FromNode string      `json:"from_node,omitempty"`
+	TraceId  string      `json:"trace_id,omitempty"`
 }
 
 // PublishBroadcast 发布跨节点广播消息

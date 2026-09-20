@@ -6,6 +6,7 @@ import (
 	rediscache "mssgServer/infra/redis"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ConnectionManager 全局连接管理器
@@ -106,7 +107,7 @@ func (cm *ConnectionManager) BindUid(uid string, ws *WSServer) {
 	if oldNode != "" && oldNode != ws.NodeAddr {
 		rediscache.PublishBroadcast(rediscache.BroadcastMsg{
 			Action: "kick",
-			UID:    uid,
+			Target: uid,
 		})
 		log.Info("[Redis] broadcast remote kick for", "uid", uid, "oldNode", oldNode)
 	}
@@ -148,7 +149,7 @@ func (cm *ConnectionManager) PushToUid(uid, name string, data interface{}) {
 	// ② 本机没有 → 广播给所有节点，持有该 uid 的节点会处理
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
 		Action: "push",
-		UID:    uid,
+		Target: uid,
 		Name:   name,
 		Data:   data,
 	})
@@ -164,7 +165,7 @@ func (cm *ConnectionManager) KickByUid(uid string) {
 	// 不在本机 → 广播给其他节点
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
 		Action: "kick",
-		UID:    uid,
+		Target: uid,
 	})
 }
 
@@ -213,6 +214,56 @@ func (cm *ConnectionManager) pushToLocalUids(uids []string, name string, data in
 	cm.mu.RUnlock()
 }
 
+// StartHeartbeatLoop 定时续期所有本机在线用户的 Redis 在线状态 key
+//
+// 为什么需要它？
+//
+//	Redis 里 online:user:{uid} → nodeAddr 有 30s TTL（onlineTTL）
+//	用户登录时 BindUser 写一次，之后如果什么都不做，30s 后 key 就过期了
+//	过期后其他节点 GetUserNode 返回 false → 私信/踢人都找不到这个用户
+//
+//	所以这里每 10s Touch 一次（远小于 30s TTL），只要用户还活着就不会过期
+//	TouchUserHeartbeat 内部就是重新 SET online:user:{uid} → nodeAddr，TTL 重置
+//
+// 启动位置：loginServer.go / chatServer.go 的 main() 里各启一个
+func (cm *ConnectionManager) StartHeartbeatLoop() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cm.mu.RLock()
+		uids := make([]string, 0, len(cm.uidMap))
+		for uid := range cm.uidMap {
+			uids = append(uids, uid)
+		}
+		cm.mu.RUnlock()
+
+		if len(uids) == 0 {
+			continue
+		}
+
+		// 逐个 Touch —— Redis 网络 IO 放到锁外做，不阻塞 cm.mu
+		// 虽然可以 Pipeline 批量，但 uid 数量一般不大（单机几千），逐个写够了
+		for _, uid := range uids {
+			rediscache.TouchUserHeartbeat(uid, cm.getNodeAddr())
+		}
+		log.Debug("[Heartbeat] online renewed", "count", len(uids))
+	}
+}
+
+// nodeAddr 当前节点的 ws 地址（启动时 SetNodeAddr 设的）
+// 用来告诉 TouchUserHeartbeat 续期时写哪个 nodeAddr
+func (cm *ConnectionManager) getNodeAddr() string {
+	// ConnectionManager 没有存 NodeAddr，但 ConnManager 是单例，
+	// 可以从 WSServer.NodeAddr 拿到（所有 WS 连接共用同一个 NodeAddr）
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	for _, ws := range cm.uidMap {
+		return ws.NodeAddr // 任取一个就行，同一节点的 NodeAddr 都一样
+	}
+	return ""
+}
+
 // OnlineUids 当前已登录用户的 uid 列表
 // 比 All() 后遍历 GetProperty 高效得多（直接读 uidMap）
 func (cm *ConnectionManager) OnlineUids() []string {
@@ -240,14 +291,14 @@ func (cm *ConnectionManager) SubscribeRemoteBroadcast() {
 
 		switch msg.Action {
 		case "kick":
-			if ws := cm.GetByUid(msg.UID); ws != nil {
-				log.Debug("[Redis] remote kick received", "uid", msg.UID, "from", msg.FromNode)
+			if ws := cm.GetByUid(msg.Target); ws != nil {
+				log.Debug("[Redis] remote kick received", "uid", msg.Target, "from", msg.FromNode)
 				go ws.Close()
 			}
 
 		case "push":
-			if ws := cm.GetByUid(msg.UID); ws != nil {
-				log.Debug("[Redis] remote push received", "uid", msg.UID, "name", msg.Name, "from", msg.FromNode)
+			if ws := cm.GetByUid(msg.Target); ws != nil {
+				log.Debug("[Redis] remote push received", "uid", msg.Target, "name", msg.Name, "from", msg.FromNode)
 				ws.Push(msg.Name, msg.Data)
 			}
 
@@ -256,15 +307,15 @@ func (cm *ConnectionManager) SubscribeRemoteBroadcast() {
 			cm.Broadcast(msg.Name, msg.Data)
 
 		case "group":
-			// msg.UID 字段在这里复用为 groupId
-			groupIds := rediscache.GetGroupMembers(msg.UID)
-			log.Debug("[Redis] remote group msg", "group", msg.UID, "members", len(groupIds), "from", msg.FromNode)
+			// Action="group" → Target 就是 groupId
+			groupIds := rediscache.GetGroupMembers(msg.Target)
+			log.Debug("[Redis] remote group msg", "group", msg.Target, "members", len(groupIds), "from", msg.FromNode)
 			cm.pushToLocalUids(groupIds, msg.Name, msg.Data)
 
 		case "room":
-			// msg.UID 字段在这里复用为 roomId
-			roomMembers := rediscache.GetRoomMembers(msg.UID)
-			log.Debug("[Redis] remote room msg", "room", msg.UID, "members", len(roomMembers), "from", msg.FromNode)
+			// Action="room" → Target 就是 roomId
+			roomMembers := rediscache.GetRoomMembers(msg.Target)
+			log.Debug("[Redis] remote room msg", "room", msg.Target, "members", len(roomMembers), "from", msg.FromNode)
 			cm.pushToLocalUids(roomMembers, msg.Name, msg.Data)
 
 		default:

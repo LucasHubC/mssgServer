@@ -40,7 +40,76 @@ func main() {
 		rediscache.SetMyNodeAddr(nodeAddr)
 		// 后台协程：订阅其他节点发来的 Redis 广播
 		go net.ConnManager.SubscribeRemoteBroadcast()
+		// 后台协程：定时续期本机所有在线用户的 Redis 在线状态（防止 30s 过期被误判下线）
+		go net.ConnManager.StartHeartbeatLoop()
+
+		// ✅ 初始化跨服 RPC 模块（Redis Stream + Pub/Sub）
+		rpc.Init(nodeAddr)
+		// 注册本节点能响应的 RPC 方法 —— 其他节点可以 Call() 过来
+		rpc.Handle("get_online_count", func(p map[string]any) (any, error) {
+			return net.ConnManager.Total(), nil
+		})
+		rpc.Handle("ping", func(p map[string]any) (any, error) {
+			return "pong", nil
+		})
+
+		// ────────────────────────────────────
+		// 🆕 get_inventory —— 跨服查背包
+		// ────────────────────────────────────
+		// 其他节点（chatServer / gameServer）可以 Call() 过来查指定玩家的道具
+		// 数据走 Redis 热数据层，不碰 DB，高性能
+		rpc.Handle("get_inventory", func(p map[string]any) (any, error) {
+			uid, _ := p["uid"].(string)
+			if uid == "" {
+				return nil, fmt.Errorf("uid is required")
+			}
+			items, err := rediscache.GetAllItems(uid)
+			if err != nil {
+				return nil, fmt.Errorf("redis read failed: %w", err)
+			}
+			return map[string]any{
+				"uid":   uid,
+				"items": items,
+			}, nil
+		})
+
+		// ────────────────────────────────────
+		// 🆕 [演示] 跨服 RPC 自测
+		// ────────────────────────────────────
+		// 启动 6 秒后自动 ping chatServer，验证跨服 RPC 链路通不通
+		go func() {
+			time.Sleep(6 * time.Second)
+
+			// 从配置文件读 chatServer 地址
+			chatAddr := fmt.Sprintf("ws://%s:%s",
+				config.File.MustValue("chat_server", "host", "127.0.0.1"),
+				config.File.MustValue("chat_server", "port", "8004"))
+
+			// 测试 1：loginServer → chatServer ping
+			result, err := rpc.Call(chatAddr, "ping", nil, 3*time.Second)
+			if err != nil {
+				log.Warn("[RPC Demo] loginServer → chatServer ping failed",
+					"err", err, "💡 可能 chatServer 没启动")
+			} else {
+				log.Info("[RPC Demo] ✅ loginServer → chatServer ping 通了！",
+					"result", result)
+			}
+
+			// 测试 2：调自己的 get_inventory（演示 handler 工作正常）
+			myResult, myErr := rpc.Call(nodeAddr, "get_inventory",
+				map[string]any{"uid": "_any_demo_uid_"}, 3*time.Second)
+			log.Info("[RPC Demo] 调自己 get_inventory",
+				"err", myErr, "result", myResult)
+		}()
+
 	}
+	
+
+
+
+
+
+
 
 	s := net.NewServer(host + ":" + port)
 	// 给 Server 设置 NodeAddr，后续每个新连接都会继承这个值
@@ -121,7 +190,10 @@ func gracefulShutdown(done chan struct{}) {
 	log.Info("waiting handlers to finish...")
 	net.WaitHandlers()
 
-	// ⑤ 强制保存所有脏背包到 MySQL（防止最后 30s 内的修改丢失）
+	// ⑤ 停掉 RPC 模块（不再响应新请求）
+	rpc.Close()
+
+	// ⑥ 强制保存所有脏背包到 MySQL（防止最后 30s 内的修改丢失）
 	log.Info("saving dirty inventory...")
 	inventory.Shutdown()
 
