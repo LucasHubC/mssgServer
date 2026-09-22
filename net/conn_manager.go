@@ -72,26 +72,21 @@ func (cm *ConnectionManager) Unregister(ws *WSServer) {
 	atomic.AddInt64(&cm.total, -1)
 }
 
-// BindUid 登录成功后绑定 uid（同一 uid 重复登录会踢掉旧连接）
-// 同时通过 Redis 告知其他节点"这个用户在我这了"
-func (cm *ConnectionManager) BindUid(uid string, ws *WSServer) {
-	// ① 先查 Redis 里这个 uid 原来在哪个节点（用来通知旧节点踢人）
-	var oldNode string
-	if ws.NodeAddr != "" {
-		if node, ok := rediscache.GetUserNode(uid); ok {
-			oldNode = node
-		}
-	}
-
-	// ② 拿分布式锁 + 写入新的在线位置
-	if ws.NodeAddr != "" {
+// BindUid 登录成功后绑定 uid（同一 uid 重复登录会踢掉本机旧连接）
+// skipRedis: true = 只写本机 uidMap（做法 A 后端代理场景，Redis 锁由 login 服务独占）
+//
+//	false = 完整流程（login handler 用，需要 Redis 锁保证唯一性）
+func (cm *ConnectionManager) BindUid(uid string, ws *WSServer, skipRedis bool) {
+	bindUidDiagCount.Add(1)
+	// ① 写 Redis 在线位置（login handler 才需要，后端代理跳过）
+	if !skipRedis && ws.NodeAddr != "" {
 		if !rediscache.BindUser(uid, ws.NodeAddr) {
 			log.Warn("BindUid rejected by redis lock", "uid", uid)
 			return
 		}
 	}
 
-	// ③ 本机处理：踢本机旧连接
+	// ② 本机处理：踢本机旧连接（同一进程内同一 uid 的旧 WS）
 	cm.mu.Lock()
 	if old, ok := cm.uidMap[uid]; ok && old != ws {
 		delete(cm.uidMap, uid)
@@ -101,16 +96,11 @@ func (cm *ConnectionManager) BindUid(uid string, ws *WSServer) {
 	cm.uidMap[uid] = ws
 	cm.mu.Unlock()
 
-	// ④ 跨节点处理：如果旧连接在别的节点，广播让它们踢
-	// （BindUser 内部已经 SET 了新值，旧节点的 SubscribeRemoteBroadcast
-	//   会收到这个广播 → 踢掉本机上的那个 uid 对应的连接）
-	if oldNode != "" && oldNode != ws.NodeAddr {
-		rediscache.PublishBroadcast(rediscache.BroadcastMsg{
-			Action: "kick",
-			Target: uid,
-		})
-		log.Info("[Redis] broadcast remote kick for", "uid", uid, "oldNode", oldNode)
-	}
+	// ⚠️ 不再做跨节点 kick！
+	// Gateway 场景：login/chat/room 后端同时 BindUid 同一个 uid 是正常代理行为，
+	// 每个后端都以为"用户从别的节点迁过来"→ 都发 kick → Gateway 收到→ 踢掉客户端
+	// 跨服踢人统一链路：admin/kick → Redis kick → 所有后端 Subscribe kick
+	//   → 后端 Close Gateway 的 backend WS → Gateway reader 全退 → return → 客户端断 ✅
 }
 
 // GetByUid 按 uid 查连接
@@ -120,12 +110,58 @@ func (cm *ConnectionManager) GetByUid(uid string) *WSServer {
 	return cm.uidMap[uid]
 }
 
-// Broadcast 向本机所有活跃连接推消息（非阻塞）
+// broadcastWorkerPool 控制并发广播的 goroutine 数
+var broadcastWorkerPool = make(chan struct{}, 16)
+
+// broadcastDiagCount 诊断用：统计 Broadcast 调用次数
+var broadcastDiagCount atomic.Int64
+var bindUidDiagCount atomic.Int64
+var bindUidDiagOnce sync.Once
+
+// Broadcast 向本机所有已登录用户推消息
+// ⚡ 业界主流优化：异步 + 分批
+//   - 异步：不阻塞调用方（handler 立刻返回处理下一条）
+//   - 分批：uidMap 分成 16 份，每份一个 goroutine 并行推
+//     1000 客户端 × 10 条 world/s = 10000 条 world/s
+//     每条 × 1000 用户 = 1000 万次 push/s
+//     分 16 份并行 → 每份 62.5 万次 push/s → 可控
 func (cm *ConnectionManager) Broadcast(name string, data interface{}) {
 	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-	for ws := range cm.conns {
-		ws.Push(name, data) // 统一走 Push：atomic Seq + safeSend 非阻塞
+	uids := make([]*WSServer, 0, len(cm.uidMap))
+	for _, ws := range cm.uidMap {
+		uids = append(uids, ws)
+	}
+	cm.mu.RUnlock()
+
+	// 🔍 诊断：定期打印 uidMap 大小（第一次 + 每 5000 次）
+	broadcastDiagCount.Add(1)
+	if broadcastDiagCount.Load() <= 3 || broadcastDiagCount.Load()%5000 == 0 {
+		log.Info("[Broadcast] diag", "uidMap_size", len(uids), "total_conns", cm.Total(), "bindUid_count", bindUidDiagCount.Load())
+	}
+
+	if len(uids) == 0 {
+		return
+	}
+
+	// 分片并发推（最多 16 片）
+	const workers = 16
+	chunk := (len(uids) + workers - 1) / workers
+	for i := 0; i < workers; i++ {
+		start := i * chunk
+		if start >= len(uids) {
+			break
+		}
+		end := start + chunk
+		if end > len(uids) {
+			end = len(uids)
+		}
+		broadcastWorkerPool <- struct{}{}
+		go func(list []*WSServer) {
+			defer func() { <-broadcastWorkerPool }()
+			for _, ws := range list {
+				ws.Push(name, data)
+			}
+		}(uids[start:end])
 	}
 }
 
@@ -291,9 +327,19 @@ func (cm *ConnectionManager) SubscribeRemoteBroadcast() {
 
 		switch msg.Action {
 		case "kick":
-			if ws := cm.GetByUid(msg.Target); ws != nil {
-				log.Debug("[Redis] remote kick received", "uid", msg.Target, "from", msg.FromNode)
-				go ws.Close()
+			// kick 统一链路：admin/kick → Redis kick → 所有后端 Subscribe kick
+			//   → 后端 Close Gateway 的 backend WS → Gateway reader 全退
+			//   → proxyBackendToClient return → HandleWSProxy defer Close client WS
+			cm.mu.Lock()
+			if ws, ok := cm.uidMap[msg.Target]; ok {
+				log.Info("[Redis] remote kick: closing WS", "uid", msg.Target, "from", msg.FromNode)
+				delete(cm.uidMap, msg.Target)
+				delete(cm.conns, ws)
+				cm.mu.Unlock()
+				rediscache.UnbindUser(msg.Target)
+				go ws.Close() // Close Gateway backend WS → Gateway reader 全退
+			} else {
+				cm.mu.Unlock()
 			}
 
 		case "push":

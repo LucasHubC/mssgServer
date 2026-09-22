@@ -49,7 +49,7 @@ func (r *Room) wsCreateRoom(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	uid, _ := net.GetAuthInfo(req.Conn)
+	uid, _ := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -269,16 +269,7 @@ func (r *Room) wsDeleteRoom(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		return
 	}
 
-	// 先广播再删除 —— 删除后 Redis 里 room:members 就没了
-	notice := map[string]any{
-		"type":   "room_deleted",
-		"roomId": body.RoomId,
-	}
-	net.ConnManager.PushToLocalRoomMembers(body.RoomId, "room.notice", notice)
-	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
-		Action: "room", Target: body.RoomId, Name: "room.notice", Data: notice,
-	})
-
+	// ① 先删（Lua 原子，一次性清 room info + members + 所有用户索引）
 	if err := rediscache.DeleteRoom(body.RoomId, uid); err != nil {
 		rsp.Body.Code = -1
 		msg := "删除失败"
@@ -291,6 +282,16 @@ func (r *Room) wsDeleteRoom(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": msg}
 		return
 	}
+
+	// ② 再广播 —— 此时 Redis 已删干净，广播里只带 roomId 让客户端自己清缓存
+	notice := map[string]any{
+		"type":   "room_deleted",
+		"roomId": body.RoomId,
+	}
+	net.ConnManager.PushToLocalRoomMembers(body.RoomId, "room.notice", notice)
+	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
+		Action: "room", Target: body.RoomId, Name: "room.notice", Data: notice,
+	})
 
 	rsp.Body.Msg = map[string]string{"msg": "ok"}
 	log.Info("[WS] room deleted", "room", body.RoomId, "by", uid)

@@ -19,7 +19,7 @@ import (
 
 func main() {
 
-	log.Init()
+	log.Init("login")
 	host := config.File.MustValue("login_server", "host", "127.0.0.1")
 	port := config.File.MustValue("login_server", "port", "8003")
 	gatewayURL := config.File.MustValue("gateway", "url", "http://127.0.0.1:9000")
@@ -103,13 +103,6 @@ func main() {
 		}()
 
 	}
-	
-
-
-
-
-
-
 
 	s := net.NewServer(host + ":" + port)
 	// 给 Server 设置 NodeAddr，后续每个新连接都会继承这个值

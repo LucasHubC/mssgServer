@@ -1,9 +1,11 @@
 package net
 
 import (
+	"context"
 	"mssgServer/infra/log"
 	rediscache "mssgServer/infra/redis"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -12,6 +14,7 @@ type Server struct {
 	address  string
 	router   *Router
 	nodeAddr string // 当前节点的 ws 地址（如 "ws://127.0.0.1:8003"），跨节点 Redis 同步用
+	httpSrv  *http.Server
 }
 
 func NewServer(addr string) *Server {
@@ -30,9 +33,7 @@ func (s *Server) SetNodeAddr(addr string) {
 }
 
 func (s *Server) Start() {
-	// ⚠️ ReadTimeout/WriteTimeout/IdleTimeout 对 WebSocket 长连接必须设为 0
-	// 否则 WebSocket 握手完成后，10s 内没发新请求就会被 HTTP Server 掐掉
-	srv := &http.Server{
+	s.httpSrv = &http.Server{
 		Addr:           s.address,
 		MaxHeaderBytes: 1 << 20,
 	}
@@ -40,8 +41,24 @@ func (s *Server) Start() {
 	http.HandleFunc("/", s.wsHandler)
 
 	log.Info("server starting", "addr", s.address)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Error("listen and serve failed", "addr", s.address, "err", err)
+	go func() {
+		if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error("listen and serve failed", "addr", s.address, "err", err)
+		}
+	}()
+}
+
+// Shutdown 优雅关闭 HTTP Server（给活跃连接最多 5 秒收尾时间）
+func (s *Server) Shutdown() {
+	if s.httpSrv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.httpSrv.Shutdown(ctx); err != nil {
+		log.Warn("http server shutdown error", "err", err)
+	} else {
+		log.Info("http server gracefully stopped", "addr", s.address)
 	}
 }
 
@@ -79,7 +96,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			wsServer.SetProperty("username", sess.Username)
 			log.Info("ws auto auth via token", "uid", sess.UId, "username", sess.Username)
 			// 绑定到 ConnManager（跨服 PushToUid / BindUid 需要）
-			ConnManager.BindUid(sess.UId, wsServer)
+			ConnManager.BindUid(sess.UId, wsServer, true) // skipRedis: 后端只写本机 uidMap
 		} else {
 			log.Warn("ws auth failed: invalid token", "remote", r.RemoteAddr)
 		}

@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	log.Init()
+	log.Init("gateway")
 
 	host := config.File.MustValue("gateway", "host", "0.0.0.0")
 	port := config.File.MustValue("gateway", "port", "9000")
@@ -34,13 +34,18 @@ func main() {
 	http.HandleFunc("/gateway/route", gtw.HandleRoute)
 	http.HandleFunc("/gateway/status", gtw.HandleStatus)
 
+	// ──── 两阶段连接的第一阶段：客户端先调 dispatch 拿 broker 地址 ────
+	http.HandleFunc("/gateway/dispatch", gtw.HandleDispatch)
+
 	// ──── 管理后台用的 HTTP API（跨服广播/推送/踢人）────
 	http.HandleFunc("/admin/broadcast", gtw.HandleAdminBroadcast)
 	http.HandleFunc("/admin/push", gtw.HandleAdminPush)
 	http.HandleFunc("/admin/kick", gtw.HandleAdminKick)
 
-	// ──── WS 智能路由代理（客户端永远只连这个地址）────
-	http.HandleFunc("/ws", gtw.HandleWSProxy)
+	// ──── WS 智能路由代理（Gateway 进程内：gtw 就是 NodeProvider）────
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		gateway.HandleWSProxy(w, r, "Gateway", gtw)
+	})
 
 	// 启动清理协程
 	go gtw.CleanupLoop()
@@ -52,4 +57,5 @@ func main() {
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal("[Gateway] listen failed", "err", err)
 	}
+
 }

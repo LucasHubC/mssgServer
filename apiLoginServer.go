@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	log.Init()
+	log.Init("apiLogin")
 
 	host := config.File.MustValue("api_server", "host", "127.0.0.1")
 	port := config.File.MustValue("api_server", "port", "8005")

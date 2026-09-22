@@ -85,7 +85,7 @@ func (a *Account) login(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 
 	// 注意：BindUid 需要把 WSConn 强转回 *WSServer
 	if ws, ok := req.Conn.(*net.WSServer); ok {
-		net.ConnManager.BindUid(user.UId, ws)
+		net.ConnManager.BindUid(user.UId, ws, false)
 	}
 
 	// ✅ 登录成功：从 MySQL 加载背包进 Redis（防止 Redis 重启导致道具丢失）

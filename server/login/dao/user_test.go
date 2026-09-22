@@ -18,7 +18,7 @@ func TestMain(m *testing.M) {
 	os.Chdir("../../..")
 
 	// ① 先初始化日志（db.Init 里会调 log.Info）
-	log.Init()
+	log.Init("")
 
 	// ② 再初始化 DB + Redis
 	if err := db.Init(); err != nil {

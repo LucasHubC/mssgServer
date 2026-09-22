@@ -18,7 +18,7 @@ import (
 
 func main() {
 
-	log.Init()
+	log.Init("room")
 	host := config.File.MustValue("room_server", "host", "127.0.0.1")
 	port := config.File.MustValue("room_server", "port", "8005")
 	gatewayURL := config.File.MustValue("gateway", "url", "http://127.0.0.1:9000")
@@ -103,9 +103,15 @@ func gracefulShutdown(done chan struct{}) {
 	}
 	wg.Wait()
 
+	// ③ 等所有正在执行的 handler 跑完
+	log.Info("waiting handlers to finish...")
 	net.WaitHandlers()
+
+	// ④ 停掉 RPC 模块
 	rpc.Close()
 
-	log.Info("roomServer bye~")
-	close(done)
+	// ⑤ 强制退出（因为 s.Start() 内部 ListenAndServe 是阻塞的，main 走不到 <-waitCh）
+	log.Info("roomServer graceful shutdown complete")
+	fmt.Println("👋 roomServer bye~")
+	os.Exit(0)
 }

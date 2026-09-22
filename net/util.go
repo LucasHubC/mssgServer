@@ -5,12 +5,9 @@ import (
 )
 
 // ────────────────────────────────────────
-//  通用消息工具（所有 controller 共用）
+//  通用消息工具
 // ────────────────────────────────────────
 
-// ParseMsg 把 ReqBody.Msg (interface{}) 反序列化到具体结构体
-// 原理：先 Marshal 成 JSON，再 Unmarshal 到目标结构体
-// 这样无论客户端发的是 map[string]interface{} 还是 JSON 字符串都能解析
 func ParseMsg(raw interface{}, target interface{}) error {
 	if raw == nil {
 		return nil
@@ -23,11 +20,9 @@ func ParseMsg(raw interface{}, target interface{}) error {
 }
 
 // ────────────────────────────────────────
-//  通用连接属性工具（所有 controller 共用）
+// 旧版：直连场景用（server.go 鉴权，没有 WsMsgReq）
 // ────────────────────────────────────────
 
-// GetUid 从连接取 uid（登录时 SetProperty 设的）
-// 返回 "" 表示未登录或属性丢失
 func GetUid(conn WSConn) string {
 	v, err := conn.GetProperty("uid")
 	if err != nil || v == nil {
@@ -37,7 +32,6 @@ func GetUid(conn WSConn) string {
 	return uid
 }
 
-// GetUsername 从连接取 username
 func GetUsername(conn WSConn) string {
 	v, err := conn.GetProperty("username")
 	if err != nil || v == nil {
@@ -47,9 +41,54 @@ func GetUsername(conn WSConn) string {
 	return name
 }
 
-// GetAuthInfo 一次取 uid + username（减少 GetProperty 调用次数）
 func GetAuthInfo(conn WSConn) (uid, username string) {
 	uid = GetUid(conn)
 	username = GetUsername(conn)
 	return
+}
+
+// ────────────────────────────────────────
+// 🔑 做法 A 新版：handler 里用这个！
+// Broker 注入 __uid/__username 到 msg 里
+// 后端一条 WS 代理 N 客户端 → Property 互相覆盖
+// 必须从 msg.__uid 取，不能从 Property 取！
+// ────────────────────────────────────────
+
+func GetAuthInfoFromReq(req *WsMsgReq) (uid, username string) {
+	if req.Body != nil && req.Body.Msg != nil {
+		if m, ok := req.Body.Msg.(map[string]interface{}); ok {
+			if v, _ := m["__uid"].(string); v != "" {
+				uid = v
+			}
+			if v, _ := m["__username"].(string); v != "" {
+				username = v
+			}
+		}
+	}
+	// fallback 到 Property（兼容直连场景）
+	if uid == "" {
+		if v, err := req.Conn.GetProperty("uid"); err == nil && v != nil {
+			if s, ok := v.(string); ok {
+				uid = s
+			}
+		}
+	}
+	if username == "" {
+		if v, err := req.Conn.GetProperty("username"); err == nil && v != nil {
+			if s, ok := v.(string); ok {
+				username = s
+			}
+		}
+	}
+	return
+}
+
+func GetUidFromReq(req *WsMsgReq) string {
+	uid, _ := GetAuthInfoFromReq(req)
+	return uid
+}
+
+func GetUsernameFromReq(req *WsMsgReq) string {
+	_, username := GetAuthInfoFromReq(req)
+	return username
 }

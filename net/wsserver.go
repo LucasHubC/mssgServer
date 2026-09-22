@@ -2,6 +2,7 @@ package net
 
 import (
 	"encoding/json"
+	"fmt"
 	"mssgServer/infra/log"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,12 @@ var workerPool = make(chan struct{}, 2048)
 
 // handlerWg 全局 handler WaitGroup — 用于 graceful shutdown 时等所有在跑的 handler 跑完
 var handlerWg sync.WaitGroup
+
+// 诊断用 sync.Once：仅打印一次首次收到 Broker 注入的 __uid、首次 BindUid 的日志
+var (
+	uidMsgDiagOnce    sync.Once
+	bindUidDiagOnceWS sync.Once
+)
 
 // WaitHandlers 阻塞等所有正在执行的 handler 跑完（graceful shutdown 时调）
 func WaitHandlers() {
@@ -73,10 +80,10 @@ type WSServer struct {
 func newWsServer(wsConn *websocket.Conn) *WSServer {
 	return &WSServer{
 		wsConn:   wsConn,
-		outChan:  make(chan *WsMsgResp, 256),
+		outChan:  make(chan *WsMsgResp, 32768), // 业界主流：buffer 够大扛 broadcast 洪峰（32768 指针 ≈ 256KB）
 		property: make(map[string]interface{}),
 		Seq:      0,
-		limiter:  rate.NewLimiter(30, 50),
+		limiter:  rate.NewLimiter(500, 2000),
 		done:     make(chan struct{}),
 	}
 }
@@ -98,7 +105,7 @@ func (s *WSServer) GetProperty(key string) (interface{}, error) {
 	if value, ok := s.property[key]; ok {
 		return value, nil
 	}
-	return nil, nil
+	return nil, fmt.Errorf("property %s not found", key)
 }
 
 func (s *WSServer) RemoveProperty(key string) {
@@ -121,22 +128,30 @@ func (s *WSServer) writeMessage(msgType int, data []byte) error {
 
 // safeSend 向 outChan 投递消息，连接已关闭或通道满时返回 false（绝不 panic）
 // sendMu 与 Close 互斥，保证不会向已关闭的 channel 发送
+var dropLogCount int64 // 全局丢包计数（限频用）
+
 func (s *WSServer) safeSend(msg *WsMsgResp) bool {
 	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
 	if s.closed {
+		s.sendMu.Unlock()
 		return false
 	}
 	select {
 	case s.outChan <- msg:
+		s.sendMu.Unlock()
 		return true
 	default:
-		log.Warn("outChan full, drop message", "addr", s.Addr())
+		s.sendMu.Unlock()
+		// 限频日志：每累计 100 次丢包才打 1 条，避免刷屏
+		if atomic.AddInt64(&dropLogCount, 1)%100 == 0 {
+			log.Warn("outChan full, drop message", "addr", s.Addr(), "name", msg.Body.Name, "totalDropped", atomic.LoadInt64(&dropLogCount))
+		}
 		return false
 	}
 }
 
-// Push 向本连接推送消息（非阻塞，outChan 满或连接已关时丢弃并记日志）
+// Push 向本连接推送消息（非阻塞，outChan 满或连接已关时丢弃）
+// 丢包日志在 safeSend 里限频（每 100 条打一条），这里不再重复打
 func (s *WSServer) Push(name string, data interface{}) {
 	seq := atomic.AddInt64(&s.Seq, 1) // 🔴 并发安全的序列号
 	rsp := &WsMsgResp{
@@ -147,9 +162,7 @@ func (s *WSServer) Push(name string, data interface{}) {
 			Msg:  data,
 		},
 	}
-	if !s.safeSend(rsp) {
-		log.Warn("Push: outChan full or closed, drop message", "addr", s.Addr(), "name", name)
-	}
+	s.safeSend(rsp) // safeSend 返回值可忽略（丢包日志在里面限频了）
 }
 
 // 通道一旦建立 那么收发消息都要持续去监听通道
@@ -224,6 +237,35 @@ func (s *WSServer) readMsgLoop() {
 		if err != nil {
 			log.Warn("unmarshal message failed", "addr", s.Addr(), "err", err, "raw", string(messageData))
 			break
+		}
+
+		// ── 做法 A 核心：从 Broker 注入的 __uid/__username 自动设 WS Property + BindUid ──
+		// Broker 代理场景: 所有业务消息 msg 里会带 __uid/__username
+		// 直连场景 (HTTP Gateway 或测试工具): 没有这两个字段，跳过
+		// ⚠️ SetProperty ≠ BindUid！前者让 handler 能读 uid，后者让 admin/kick 能找到 WS
+		if body.Msg != nil {
+			if m, ok := body.Msg.(map[string]interface{}); ok {
+				if uid, _ := m["__uid"].(string); uid != "" {
+					// 🔍 诊断：仅首次打印，确认 Broker 注入 __uid 生效
+					uidMsgDiagOnce.Do(func() {
+						log.Info("[Diag] ✅ 收到 Broker 注入的 __uid", "uid", uid, "msgName", body.Name)
+					})
+					s.SetProperty("uid", uid)
+					if uname, _ := m["__username"].(string); uname != "" {
+						s.SetProperty("username", uname)
+					}
+					// BindUid 只绑定一次（同一 WS 收到多条带 __uid 的消息只第一次生效）
+					// GetProperty 返回 (interface{}, error)，error != nil 表示 property 不存在
+					if _, err := s.GetProperty("__bound"); err != nil {
+						ConnManager.BindUid(uid, s, true) // skipRedis=true: 后端代理只写本机 uidMap
+						s.SetProperty("__bound", true)
+						// 🔍 诊断：仅首次打印，确认 BindUid 被调用
+						bindUidDiagOnceWS.Do(func() {
+							log.Info("[Diag] ✅ BindUid called (skipRedis=true)", "uid", uid, "total", ConnManager.Total())
+						})
+					}
+				}
+			}
 		}
 
 		// ✅ 限流检查：Allow 不阻塞，超限直接断开

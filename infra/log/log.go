@@ -18,9 +18,16 @@ import (
 // 全局 Logger，业务代码用 log.Info / log.Error 即可
 var L *slog.Logger
 
+// serverName 由 Init(serverName) 传入，用于自动命名日志文件
+var currentServerName string
+
 // Init 从配置读取日志级别并初始化全局 Logger
-// 支持两种输出格式：text（控制台友好）和 json（结构化收集）
-func Init() {
+// serverName: 当前服务名（如 login/chat/room/broker/gateway），用于日志文件名
+//
+//	例: Init("login") + output=dual:logs/app.log → logs/login-2026-09-22.log
+//	例: Init("")  → 行为不变，用配置里的原始文件名
+func Init(serverName string) {
+	currentServerName = serverName
 	levelStr := config.File.MustValue("log", "level", "debug")
 	format := config.File.MustValue("log", "format", "text")
 	output := config.File.MustValue("log", "output", "console")
@@ -145,6 +152,10 @@ func newRotatingWriter(basePath string, opts ...RotateOption) *RotatingWriter {
 	rw.dir = filepath.Dir(basePath)
 	ext := filepath.Ext(basePath)
 	name := strings.TrimSuffix(filepath.Base(basePath), ext)
+	// 🔑 如果有 serverName，覆盖 baseName（让每个服务日志自动分开）
+	if currentServerName != "" {
+		name = currentServerName
+	}
 	rw.baseName = name
 	rw.ext = ext
 	rw.basePath = basePath

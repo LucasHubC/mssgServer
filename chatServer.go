@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	log.Init()
+	log.Init("chat")
 	host := config.File.MustValue("chat_server", "host", "127.0.0.1")
 	port := config.File.MustValue("chat_server", "port", "8004")
 	gatewayURL := config.File.MustValue("gateway", "url", "http://127.0.0.1:9000")

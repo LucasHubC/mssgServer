@@ -554,36 +554,56 @@ func JoinRoom(roomId, uid string) error {
 	}
 }
 
-// LeaveRoom 离开房间
+// LeaveRoom 离开房间（Lua 原子：同时从 room members set 和 user's room index zset 移除）
 func LeaveRoom(roomId, uid string) {
 	if db.RDB == nil {
 		return
 	}
-	db.RDB.SRem(redisCtx(), roomMembersKey+roomId, uid)
-	db.RDB.ZRem(redisCtx(), roomUserKey+uid, roomId)
+	const script = `
+		redis.call('SREM', KEYS[1], ARGV[1])
+		redis.call('ZREM', KEYS[2], ARGV[2])
+		return 1
+	`
+	db.RDB.Eval(redisCtx(), script,
+		[]string{roomMembersKey + roomId, roomUserKey + uid},
+		uid, roomId,
+	)
 }
 
-// KickFromRoom 踢出房间成员（由房主调用）
+// KickFromRoom 踢出房间成员（由房主调用，Lua 原子：读校验写合一）
 func KickFromRoom(roomId, ownerUid, targetUid string) error {
 	if db.RDB == nil {
 		return nil
 	}
-
-	info, err := GetRoomInfo(roomId)
+	const script = `
+		if redis.call('EXISTS', KEYS[1]) == 0 then
+			return -1
+		end
+		if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[1] then
+			return -2
+		end
+		if ARGV[1] == ARGV[2] then
+			return -3
+		end
+		redis.call('SREM', KEYS[2], ARGV[2])
+		redis.call('ZREM', KEYS[3], ARGV[2])
+		return 1
+	`
+	res, err := db.RDB.Eval(redisCtx(), script,
+		[]string{roomInfoKey + roomId, roomMembersKey + roomId, roomUserKey + targetUid},
+		ownerUid, targetUid,
+	).Int()
 	if err != nil {
 		return err
 	}
-	if info == nil {
+	switch res {
+	case -1:
 		return ErrRoomNotFound
-	}
-	if info.Owner != ownerUid {
+	case -2:
 		return ErrNotRoomOwner
-	}
-	if info.Owner == targetUid {
+	case -3:
 		return ErrCannotKickSelf
 	}
-
-	LeaveRoom(roomId, targetUid)
 	return nil
 }
 
