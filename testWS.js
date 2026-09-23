@@ -10,6 +10,86 @@
  */
 
 const readline = require('readline');
+const path = require('path');
+const protobuf = require('protobufjs');
+
+// Protobuf 动态加载 proto/ws.proto
+const pbRoot = protobuf.loadSync(path.join(__dirname, 'proto', 'ws.proto'));
+const WSReq  = pbRoot.lookupType('ws.WSReq');
+const WSResp = pbRoot.lookupType('ws.WSResp');
+
+// ── name → oneof 字段名映射表 ──
+// protobufjs 动态加载会把 proto snake_case 自动转成 camelCase
+const nameToOneofField = {
+    'account.login':     'accountLogin',
+    'account.register':  'accountRegister',
+    'chat.world.send':   'chatWorldSend',
+    'chat.private.send': 'chatPrivateSend',
+    'chat.group.send':   'chatGroupSend',
+    'chat.group.join':   'groupMemberReq',
+    'chat.group.leave':  'groupMemberReq',
+    'chat.group.members':'groupMemberReq',
+    'room.create':       'roomCreate',
+    'room.join':         'roomJoin',
+    'room.leave':        'roomLeave',
+    'room.kick':         'roomKick',
+    'room.delete':       'roomDelete',
+    'room.send':         'roomSend',
+};
+
+const respOneofFieldToName = {
+    'accountLoginResp':    'account.login',
+    'accountRegisterResp': 'account.register',
+    'chatWorldNew':        'chat.world.new',
+    'chatPrivateNew':      'chat.private.new',
+    'chatGroupNew':        'chat.group.new',
+    'groupMemberResp':     'chat.group.members',
+    'chatOnlineResp':      'chat.online.get',
+    'roomCreateResp':      'room.create',
+    'roomJoinResp':        'room.join',
+    'roomChatNew':         'room.chat.new',
+    'roomNotice':          'room.notice',
+    'systemBroadcast':     'system.broadcast',
+    'systemPush':          'system.push',
+};
+
+// 发消息：优先 oneof typed message；兜底 msg_json
+function encodeMsg(seq, name, msg = {}) {
+    const payload = { seq: seq || 0, name };
+    const oneofField = nameToOneofField[name];
+    if (oneofField) {
+        payload[oneofField] = msg;
+    } else {
+        payload.msgJson = JSON.stringify(msg);
+    }
+    return WSReq.encode(WSReq.create(payload)).finish();
+}
+
+// 收消息：优先从 oneof 取 typed message；兜底 msg_json
+function decodeMsg(buf) {
+    const p = WSResp.decode(buf);
+    let msg = null, oneofName = null;
+    const msgOneof = WSResp.oneofs.msg;
+    if (msgOneof) {
+        for (const member of msgOneof.oneof) {
+            if (p[member] != null && p[member] !== undefined) {
+                msg = p[member];
+                oneofName = respOneofFieldToName[member];
+                break;
+            }
+        }
+    }
+    if (msg == null && p.msgJson) {
+        try { msg = JSON.parse(p.msgJson); } catch {}
+    }
+    return {
+        seq: Number(p.seq),
+        name: oneofName || p.name,
+        code: p.code,
+        msg: msg || {}
+    };
+}
+
 let WebSocket;
 try {
     WebSocket = require('ws');
@@ -140,9 +220,9 @@ function nextSeq() { return ++seq; }
 //  发消息封装
 // ═══════════════════════════════════════════════
 function send(ws, name, msg = {}) {
-    const payload = JSON.stringify({ seq: nextSeq(), name, msg });
+    const seq = nextSeq();
     console.log(`📤 → ${name}`, JSON.stringify(msg));
-    ws.send(payload);
+    ws.send(encodeMsg(seq, name, msg));
 }
 
 // ═══════════════════════════════════════════════
@@ -177,7 +257,7 @@ async function main() {
 
     ws.onmessage = (event) => {
     try {
-        const data = JSON.parse(event.data);
+        const data = decodeMsg(event.data);
         // 登录响应自动缓存 uid + token
         if (data.name === 'account.login' && data.code === 0 && data.msg) {
             currentUId = data.msg.uid || '';
@@ -271,7 +351,7 @@ async function main() {
             console.log('   ', formatted);
         }
     } catch (e) {
-        console.log('📥 ← 原始:', event.data);
+        console.log('📥 ← 原始(hex):', Buffer.isBuffer(event.data) ? event.data.toString('hex').substring(0, 100) : event.data);
     }
 };
 
@@ -369,9 +449,11 @@ function runCrossServerTest() {
             c.onopen = () => resolve(c);
             c.onerror = (e) => reject(new Error(`${label} connect failed: ${e.message || e}`));
             c.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (!c._pending[data.name]) c._pending[data.name] = [];
-                c._pending[data.name].push(data);
+                try {
+                    const data = decodeMsg(event.data);
+                    if (!c._pending[data.name]) c._pending[data.name] = [];
+                    c._pending[data.name].push(data);
+                } catch (e) {}
             };
         });
     }
@@ -379,8 +461,7 @@ function runCrossServerTest() {
     function sendAndWait(c, name, body, expectedResponseName = null, timeout = 2000) {
         return new Promise((resolve) => {
             const mySeq = ++seq;
-            const p = JSON.stringify({ seq: mySeq, name, msg: body });
-            c.send(p);
+            c.send(encodeMsg(mySeq, name, body));
 
             if (!expectedResponseName) {
                 setTimeout(() => resolve(null), timeout);
@@ -533,7 +614,7 @@ function runCrossServerTest() {
             const origB = connB.onmessage;
             connB.onmessage = (event) => {
                 try {
-                    const d = JSON.parse(event.data);
+                    const d = decodeMsg(event.data);
                     if (d.name === 'system.push') {
                         bReceivedPush = true;
                         console.log(`     📥 B 收到 admin/push`);
@@ -567,7 +648,7 @@ function runCrossServerTest() {
             const origA = connA.onmessage;
             connA.onmessage = (event) => {
                 try {
-                    const d = JSON.parse(event.data);
+                    const d = decodeMsg(event.data);
                     if (d.name === 'system.broadcast') aBC = true;
                     if (origA) origA(event);
                 } catch (e) {}
@@ -575,7 +656,7 @@ function runCrossServerTest() {
             const origB2 = connB.onmessage;
             connB.onmessage = (event) => {
                 try {
-                    const d = JSON.parse(event.data);
+                    const d = decodeMsg(event.data);
                     if (d.name === 'system.broadcast') bBC = true;
                     if (origB2) origB2(event);
                 } catch (e) {}

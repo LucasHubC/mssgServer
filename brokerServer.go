@@ -6,9 +6,11 @@ import (
 	"mssgServer/config/db"
 	"mssgServer/gateway"
 	"mssgServer/infra/log"
+	"mssgServer/infra/metrics"
 	rediscache "mssgServer/infra/redis"
 	"mssgServer/infra/rpc"
 	"net/http"
+	_ "net/http/pprof"
 	"time"
 )
 
@@ -31,6 +33,10 @@ func main() {
 	}
 
 	gwClient := gateway.NewHTTPGatewayClient(gatewayURL)
+
+	// Metrics + pprof + health
+	metrics.Init()
+	metrics.RegisterHTTP()
 
 	// Subscribe Redis kick — admin/kick 需要踢 client WS（做法 A 后 kick backend WS 只会触发重连）
 	gateway.StartKickListener()

@@ -103,18 +103,42 @@ func (g *Gateway) Route(req rpc.RouteReq) *rpc.RouteResp {
 }
 
 // CleanupLoop 定期清理超时节点
+// ⚡ 优化:先 RLock 扫描,再 Lock 更新,减少对 Route 的阻塞
 func (g *Gateway) CleanupLoop() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		g.mu.Lock()
+		// Phase 1:RLock 扫描所有节点状态
+		g.mu.RLock()
+		toDelete := make(map[string][]int) // type → 要删的 index
 		for typ, nodes := range g.nodes {
+			for i, n := range nodes {
+				if !n.IsAlive() {
+					toDelete[typ] = append(toDelete[typ], i)
+					log.Warn("[Gateway] node timeout", "type", typ, "addr", n.Addr)
+				}
+			}
+		}
+		g.mu.RUnlock()
+
+		// Phase 2:有东西要删才拿 Lock
+		if len(toDelete) == 0 {
+			continue
+		}
+		g.mu.Lock()
+		for typ, idxs := range toDelete {
+			nodes := g.nodes[typ]
+			if len(nodes) == 0 {
+				continue
+			}
 			var alive []*Node
-			for _, n := range nodes {
-				if n.IsAlive() {
+			idxSet := make(map[int]struct{}, len(idxs))
+			for _, i := range idxs {
+				idxSet[i] = struct{}{}
+			}
+			for i, n := range nodes {
+				if _, remove := idxSet[i]; !remove {
 					alive = append(alive, n)
-				} else {
-					log.Warn("[Gateway] node timeout, removing", "type", typ, "addr", n.Addr)
 				}
 			}
 			if len(alive) == 0 {

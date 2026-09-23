@@ -6,8 +6,10 @@ import (
 	"mssgServer/config/db"
 	"mssgServer/gateway"
 	"mssgServer/infra/log"
+	"mssgServer/infra/metrics"
 	rediscache "mssgServer/infra/redis"
 	"net/http"
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -27,6 +29,10 @@ func main() {
 	}
 
 	gtw := gateway.NewGateway(gateway.RoutePolicy(policy))
+
+	// ──── Metrics + pprof + health ────
+	metrics.Init()
+	metrics.RegisterHTTP()
 
 	// ──── 后端节点用的 HTTP API ────
 	http.HandleFunc("/gateway/register", gtw.HandleRegister)

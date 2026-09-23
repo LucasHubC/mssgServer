@@ -31,6 +31,7 @@ func main() {
 	defer db.CloseRedis()
 
 	rediscache.SetMyNodeAddr(nodeAddr)
+	rediscache.StartAsyncBroadcast() // 🔴 异步广播：handler 不等待 Redis Publish
 	go net.ConnManager.SubscribeRemoteBroadcast()
 	go net.ConnManager.StartHeartbeatLoop()
 

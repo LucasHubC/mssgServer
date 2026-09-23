@@ -1,3 +1,57 @@
+
+# 装依赖
+go get github.com/prometheus/client_golang/prometheus
+go get github.com/prometheus/client_golang/prometheus/promauto
+go get github.com/prometheus/client_golang/prometheus/promhttp
+go mod tidy
+
+
+
+
+# 检查 protoc 是否装了
+protoc --version
+
+# 如果没装，Windows 用 winget：
+winget install Google.Protobuf
+
+# 或手动下载：https://github.com/protocolbuffers/protobuf/releases
+
+# 下载 protoc-xx.x-win64.zip，解压到 C:\tools\protoc\bin，加 PATH
+
+# 安装 Go 代码生成器
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+# 验证
+protoc-gen-go --version
+
+
+cd e:\mssgServer
+
+# 用 protoc 生成 Go 代码  https://github.com/protocolbuffers/protobuf/releases/latest
+
+# 假设 protoc 装在 C:\tools\protoc\bin
+protoc --go_out=. --go_opt=paths=source_relative proto/ws.proto
+
+# 安装 protobuf runtime
+go get google.golang.org/protobuf
+
+# go mod tidy
+go mod tidy
+
+
+
+#客户端 testBench.js / testWS.js 改 Protobuf
+# 用 protobufjs 生成 JS（node 侧用 protobufjs）
+cd e:\mssgServer
+npm install protobufjs
+npx pbjs -t static-module -w commonjs -o proto/ws.js proto/ws.proto
+
+
+
+
+
+
+
 cd e:\mssgServer
 
 # 跑所有测试 + 输出覆盖率

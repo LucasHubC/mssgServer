@@ -55,17 +55,25 @@ func GetAuthInfo(conn WSConn) (uid, username string) {
 // ────────────────────────────────────────
 
 func GetAuthInfoFromReq(req *WsMsgReq) (uid, username string) {
-	if req.Body != nil && req.Body.Msg != nil {
+	// ✅ 阶段 2：优先读外层 AuthUid/AuthUsername（Broker 注入）
+	if req.Body != nil {
+		uid = req.Body.AuthUid
+		username = req.Body.AuthUsername
+	}
+
+	// 兜底：阶段 1 兼容，从 Msg map 抠 __uid/__username
+	if (uid == "" || username == "") && req.Body != nil && req.Body.Msg != nil {
 		if m, ok := req.Body.Msg.(map[string]interface{}); ok {
-			if v, _ := m["__uid"].(string); v != "" {
+			if v, _ := m["__uid"].(string); uid == "" && v != "" {
 				uid = v
 			}
-			if v, _ := m["__username"].(string); v != "" {
+			if v, _ := m["__username"].(string); username == "" && v != "" {
 				username = v
 			}
 		}
 	}
-	// fallback 到 Property（兼容直连场景）
+
+	// 最终兜底：Property（兼容直连场景）
 	if uid == "" {
 		if v, err := req.Conn.GetProperty("uid"); err == nil && v != nil {
 			if s, ok := v.(string); ok {

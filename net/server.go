@@ -3,8 +3,10 @@ package net
 import (
 	"context"
 	"mssgServer/infra/log"
+	"mssgServer/infra/metrics"
 	rediscache "mssgServer/infra/redis"
 	"net/http"
+	_ "net/http/pprof" // 自动注册 /debug/pprof/*
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -33,6 +35,9 @@ func (s *Server) SetNodeAddr(addr string) {
 }
 
 func (s *Server) Start() {
+	metrics.Init()
+	metrics.RegisterHTTP() // /metrics + /health
+
 	s.httpSrv = &http.Server{
 		Addr:           s.address,
 		MaxHeaderBytes: 1 << 20,

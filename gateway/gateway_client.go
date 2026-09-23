@@ -18,10 +18,18 @@ type HTTPGatewayClient struct {
 }
 
 func NewHTTPGatewayClient(baseURL string) *HTTPGatewayClient {
+	// 🔴 关键:自定义 Transport 加连接池
+	// 默认 Transport MaxIdleConnsPerHost=2,3000 并发 Route 会打爆 Gateway
+	transport := &http.Transport{
+		MaxIdleConns:        500,
+		MaxIdleConnsPerHost: 500, // Broker→Gateway 全打到同一个 host
+		IdleConnTimeout:     30 * time.Second,
+	}
 	return &HTTPGatewayClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 3 * time.Second,
+			Transport: transport,
+			Timeout:   2 * time.Second, // 快速失败,不要等 3s
 		},
 	}
 }

@@ -61,7 +61,6 @@ func (c *Chat) sendWorld(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		Timestamp: time.Now().Unix(),
 	}
 
-	log.Info("[Chat] world", "from", username, "msgId", msg.MsgId, "content", truncate(body.Content, 30))
 	// 本机 + 跨服广播（BroadcastAll 内部已包含 PublishBroadcast）
 	net.ConnManager.BroadcastAll("chat.world.new", msg)
 

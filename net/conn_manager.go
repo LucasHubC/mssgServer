@@ -3,6 +3,7 @@ package net
 import (
 	"mssgServer/config"
 	"mssgServer/infra/log"
+	"mssgServer/infra/metrics"
 	rediscache "mssgServer/infra/redis"
 	"sync"
 	"sync/atomic"
@@ -47,6 +48,7 @@ func (cm *ConnectionManager) Register(ws *WSServer) bool {
 	}
 	cm.conns[ws] = struct{}{}
 	atomic.AddInt64(&cm.total, 1)
+	metrics.Connections.Set(float64(len(cm.conns)))
 	return true
 }
 
@@ -70,6 +72,7 @@ func (cm *ConnectionManager) Unregister(ws *WSServer) {
 		rediscache.UnbindUser(uidToUnbind)
 	}
 	atomic.AddInt64(&cm.total, -1)
+	metrics.Connections.Set(float64(len(cm.conns)))
 }
 
 // BindUid 登录成功后绑定 uid（同一 uid 重复登录会踢掉本机旧连接）
@@ -94,6 +97,7 @@ func (cm *ConnectionManager) BindUid(uid string, ws *WSServer, skipRedis bool) {
 		go old.Close()
 	}
 	cm.uidMap[uid] = ws
+	metrics.UIDMapSize.Set(float64(len(cm.uidMap)))
 	cm.mu.Unlock()
 
 	// ⚠️ 不再做跨节点 kick！

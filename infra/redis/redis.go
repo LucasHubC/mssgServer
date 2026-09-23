@@ -15,6 +15,7 @@ import (
 	"mssgServer/config/db"
 	"mssgServer/infra/log"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -199,20 +200,37 @@ type BroadcastMsg struct {
 	TraceId  string      `json:"trace_id,omitempty"`
 }
 
-// PublishBroadcast 发布跨节点广播消息
-// 自动填入 FromNode = 当前节点地址
+// broadcastCh 异步广播队列（buffered=1024，handler 不阻塞）
+var broadcastCh = make(chan BroadcastMsg, 1024)
+var broadcastOnce sync.Once
+
+// StartAsyncBroadcast 启动异步广播后台协程（只调一次）
+func StartAsyncBroadcast() {
+	broadcastOnce.Do(func() {
+		go func() {
+			for msg := range broadcastCh {
+				if db.RDB == nil {
+					continue
+				}
+				msg.FromNode = myNodeAddr
+				data, err := json.Marshal(msg)
+				if err != nil {
+					continue
+				}
+				if err := db.RDB.Publish(redisCtx(), ChannelBroadcast, data).Err(); err != nil {
+					log.Warn("redis PublishBroadcast failed", "err", err)
+				}
+			}
+		}()
+	})
+}
+
+// PublishBroadcast 异步发布跨节点广播消息（非阻塞，handler 直接 return）
 func PublishBroadcast(msg BroadcastMsg) {
 	if db.RDB == nil {
 		return
 	}
-	msg.FromNode = myNodeAddr // 自动标记来源，接收方用来跳过自己发的
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	if err := db.RDB.Publish(redisCtx(), ChannelBroadcast, data).Err(); err != nil {
-		log.Warn("redis PublishBroadcast failed", "err", err)
-	}
+	broadcastCh <- msg // buffered channel，满了会阻塞但队列 1024 够大
 }
 
 // SubscribeBroadcast 订阅跨节点广播频道
