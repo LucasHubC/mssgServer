@@ -247,11 +247,19 @@ func (s *WSServer) writeMsgLoop() {
 			flush()
 			return
 		}
+		// 🔍 诊断:序列化前确认 Name
+		if msg.Body.Name == "" && msg.Body.Code == 0 {
+			log.Info("[writeMsgLoop] ⚠️ RespBody.Name 为空", "code", msg.Body.Code, "msg_type", fmt.Sprintf("%T", msg.Body.Msg))
+		}
 		p, err := RespBodyToProto(msg.Body)
 		if err != nil {
 			log.Error("proto convert resp failed", "err", err)
 		} else {
 			batch = append(batch, p)
+			// 🔍 诊断:序列化后确认 protobuf Name
+			if p.Name == "" && msg.Body.Name != "" {
+				log.Info("[writeMsgLoop] ⚠️ protobuf p.Name 为空但 b.Name 不为空", "b.Name", msg.Body.Name)
+			}
 		}
 
 		// 尝试再拿 batchMaxSize-1 条（非阻塞 + 超时）
@@ -310,32 +318,34 @@ func (s *WSServer) readMsgLoop() {
 			break
 		}
 
-		// ── 做法 A 核心：从 Broker 注入的 __uid/__username 自动设 WS Property + BindUid ──
-		// Broker 代理场景: 所有业务消息 msg 里会带 __uid/__username
-		// 直连场景 (HTTP Gateway 或测试工具): 没有这两个字段，跳过
+		// ── 做法 A 核心：从 Broker 注入的 uid 自动设 WS Property + BindUid ──
+		// ⚠️ 双重来源：
+		//   ① 阶段 2 新方式: 外层 body.AuthUid (Broker injectAuthProtobuf 直接填)
+		//   ② 阶段 1 兜底:   msg_json 里的 __uid (老客户端)
+		// 直连场景 (HTTP Gateway 或测试工具): 两个都没有，跳过
 		// ⚠️ SetProperty ≠ BindUid！前者让 handler 能读 uid，后者让 admin/kick 能找到 WS
-		if body.Msg != nil {
+		var uid, username string
+		uid = body.AuthUid // ✅ 阶段 2：优先读外层鉴权字段
+		if uid == "" && body.Msg != nil {
+			// 🔁 兜底：从 msg_json 解出来的 map 里找 __uid(阶段 1)
 			if m, ok := body.Msg.(map[string]interface{}); ok {
-				if uid, _ := m["__uid"].(string); uid != "" {
-					// 🔍 诊断：仅首次打印，确认 Broker 注入 __uid 生效
-					uidMsgDiagOnce.Do(func() {
-						log.Info("[Diag] ✅ 收到 Broker 注入的 __uid", "uid", uid, "msgName", body.Name)
-					})
-					s.SetProperty("uid", uid)
-					if uname, _ := m["__username"].(string); uname != "" {
-						s.SetProperty("username", uname)
-					}
-					// BindUid 只绑定一次（同一 WS 收到多条带 __uid 的消息只第一次生效）
-					// GetProperty 返回 (interface{}, error)，error != nil 表示 property 不存在
-					if _, err := s.GetProperty("__bound"); err != nil {
-						ConnManager.BindUid(uid, s, true) // skipRedis=true: 后端代理只写本机 uidMap
-						s.SetProperty("__bound", true)
-						// 🔍 诊断：仅首次打印，确认 BindUid 被调用
-						bindUidDiagOnceWS.Do(func() {
-							log.Info("[Diag] ✅ BindUid called (skipRedis=true)", "uid", uid, "total", ConnManager.Total())
-						})
+				if u, _ := m["__uid"].(string); u != "" {
+					uid = u
+					if un, _ := m["__username"].(string); un != "" {
+						username = un
 					}
 				}
+			}
+		}
+		if uid != "" {
+			s.SetProperty("uid", uid)
+			if username != "" {
+				s.SetProperty("username", username)
+			}
+			// BindUid 只绑定一次（同一 WS 收到多条带 uid 的消息只第一次生效）
+			if _, err := s.GetProperty("__bound"); err != nil {
+				ConnManager.BindUid(uid, s, true) // skipRedis=true: 后端代理只写本机 uidMap
+				s.SetProperty("__bound", true)
 			}
 		}
 

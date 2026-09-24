@@ -26,6 +26,8 @@ func main() {
 		defer db.CloseRedis()
 		// Gateway 自己也会发广播，设个特殊 nodeAddr 用来跳过自己
 		rediscache.SetMyNodeAddr(fmt.Sprintf("gateway:%s:%s", host, port))
+		// ✅ admin API 需要 PublishBroadcast → 必须启动异步广播后台协程
+		rediscache.StartAsyncBroadcast()
 	}
 
 	gtw := gateway.NewGateway(gateway.RoutePolicy(policy))

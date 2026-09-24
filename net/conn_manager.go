@@ -25,6 +25,7 @@ type ConnectionManager struct {
 var ConnManager = NewConnectionManager(int64(config.File.MustInt("ws_server", "max_conns", 20000)))
 
 func NewConnectionManager(maxConns int64) *ConnectionManager {
+	broadcastPoolOnce.Do(initBroadcastPool) // 启动常驻 worker pool
 	return &ConnectionManager{
 		conns:    make(map[*WSServer]struct{}),
 		uidMap:   make(map[string]*WSServer),
@@ -114,8 +115,37 @@ func (cm *ConnectionManager) GetByUid(uid string) *WSServer {
 	return cm.uidMap[uid]
 }
 
-// broadcastWorkerPool 控制并发广播的 goroutine 数
-var broadcastWorkerPool = make(chan struct{}, 16)
+// ── 常驻广播 Worker Pool ─────────────────────────────────────────
+// 预创建 16 个 worker goroutine 循环从 channel 取任务
+// 避免每条 world 消息创建 16 个 goroutine（高并发下 goroutine 爆炸）
+
+type broadcastTask struct {
+	name    string
+	data    interface{}
+	targets []*WSServer // 预分片好的目标列表
+}
+
+const broadcastWorkerCount = 16
+const broadcastTaskBuffer = 2048
+
+var broadcastTaskCh chan broadcastTask
+var broadcastPoolOnce sync.Once
+var broadcastDropCount atomic.Int64
+
+func initBroadcastPool() {
+	broadcastTaskCh = make(chan broadcastTask, broadcastTaskBuffer)
+	for i := 0; i < broadcastWorkerCount; i++ {
+		go runBroadcastWorker(broadcastTaskCh)
+	}
+}
+
+func runBroadcastWorker(ch <-chan broadcastTask) {
+	for task := range ch {
+		for _, ws := range task.targets {
+			ws.Push(task.name, task.data)
+		}
+	}
+}
 
 // broadcastDiagCount 诊断用：统计 Broadcast 调用次数
 var broadcastDiagCount atomic.Int64
@@ -140,17 +170,17 @@ func (cm *ConnectionManager) Broadcast(name string, data interface{}) {
 	// 🔍 诊断：定期打印 uidMap 大小（第一次 + 每 5000 次）
 	broadcastDiagCount.Add(1)
 	if broadcastDiagCount.Load() <= 3 || broadcastDiagCount.Load()%5000 == 0 {
-		log.Info("[Broadcast] diag", "uidMap_size", len(uids), "total_conns", cm.Total(), "bindUid_count", bindUidDiagCount.Load())
+		log.Debug("[Broadcast] diag", "uidMap_size", len(uids), "total_conns", cm.Total(), "bindUid_count", bindUidDiagCount.Load())
 	}
 
 	if len(uids) == 0 {
 		return
 	}
 
-	// 分片并发推（最多 16 片）
-	const workers = 16
-	chunk := (len(uids) + workers - 1) / workers
-	for i := 0; i < workers; i++ {
+	// 分片 + 投递到常驻 worker pool（零 goroutine 创建）
+	chunk := (len(uids) + broadcastWorkerCount - 1) / broadcastWorkerCount
+	dropped := 0
+	for i := 0; i < broadcastWorkerCount; i++ {
 		start := i * chunk
 		if start >= len(uids) {
 			break
@@ -159,13 +189,18 @@ func (cm *ConnectionManager) Broadcast(name string, data interface{}) {
 		if end > len(uids) {
 			end = len(uids)
 		}
-		broadcastWorkerPool <- struct{}{}
-		go func(list []*WSServer) {
-			defer func() { <-broadcastWorkerPool }()
-			for _, ws := range list {
-				ws.Push(name, data)
-			}
-		}(uids[start:end])
+		task := broadcastTask{name: name, data: data, targets: uids[start:end]}
+		select {
+		case broadcastTaskCh <- task:
+		default:
+			// channel 满了 → 丢弃分片（广播丢包用户可接受）
+			dropped++
+		}
+	}
+	if dropped > 0 {
+		if broadcastDropCount.Add(int64(dropped))%1000 == 0 {
+			log.Warn("[Broadcast] task channel full, dropped shards", "dropped", broadcastDropCount.Load(), "name", name)
+		}
 	}
 }
 

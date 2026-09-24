@@ -3,6 +3,7 @@ package net
 import (
 	"encoding/json"
 	"fmt"
+	"mssgServer/infra/log"
 	"mssgServer/proto"
 )
 
@@ -102,6 +103,11 @@ func RespBodyToProto(b *RespBody) (*proto.WSResp, error) {
 		Seq:  b.Seq,
 		Name: b.Name,
 		Code: int32(b.Code),
+	}
+
+	// 🔍 诊断:确认 Name 有没有
+	if b.Name == "" && b.Code == 0 {
+		log.Info("[RespBodyToProto] ⚠️ Name 为空", "code", b.Code, "msg_type", fmt.Sprintf("%T", b.Msg))
 	}
 
 	if b.Msg == nil {

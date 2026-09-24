@@ -46,6 +46,7 @@ var (
 	diagInjected    atomic.Bool
 	diagNoUid       atomic.Bool
 	diagLoginStored atomic.Bool
+	uidWarnCount    atomic.Int64 // chat 消息没注入 uid 的限频计数
 
 	// 🔍 dialAll 诊断计数器：定位 no_backend 根因
 	diagDialRouteFail int64 // dialAll 中 Route 返回非零 code 的次数
@@ -384,6 +385,11 @@ func proxyClientToBackend(ps *proxySession) {
 			ps.mu.Unlock()
 			if uid != "" {
 				data = injectAuthProtobuf(data, uid, username)
+			} else if strings.HasPrefix(p.Name, "chat.") {
+				// 限频:首次 + 每 100 条打 1 条
+				if n := uidWarnCount.Add(1); n <= 1 || n%100 == 0 {
+					log.Warn("[Broker] ps.uid 为空,chat 消息没注入 uid", "name", p.Name, "total", n)
+				}
 			}
 
 			// BinaryMessage — Protobuf 是二进制
@@ -413,9 +419,10 @@ func injectAuthProtobuf(data []byte, uid, username string) []byte {
 	p.AuthUid = uid
 	p.AuthUsername = username
 
-	// 🔁 兜底：如果客户端用的是老 msg_json 格式（没有 oneof msg）
-	// 也在 msg_json 里补 __uid/__username（兼容阶段 1 的 handler）
-	if p.MsgJson != "" && p.GetMsg() == nil {
+	// 🔁 兜底：不管有没有 oneof msg，只要 msg_json 不为空就补 __uid/__username
+	// 因为 RespBodyToProto 类型断言全失败 → 全部走 msg_json 兜底
+	// chatServer readMsgLoop 同时支持 AuthUid 外层 + msg_json.__uid 两种来源
+	if p.MsgJson != "" {
 		msg := make(map[string]interface{})
 		_ = json.Unmarshal([]byte(p.MsgJson), &msg)
 		msg["__uid"] = uid
@@ -496,21 +503,13 @@ func proxyBackendToClient(ps *proxySession) {
 
 		// ── Step 3: 转发 + 去重 + 存 login uid（做法 A: WS 只是管道）──
 		for msg := range msgCh {
-			// Protobuf 解码：先拿外层 wspb.WSResp，再内层 MsgJson 解 JSON 拿 uid
+			// Protobuf 解码：先尝试 BatchResp(多条合并)，再回退 WSResp(单条)
 			p := &wspb.WSResp{}
-			if proto.Unmarshal(msg.data, p) != nil {
+			batch := &wspb.BatchResp{}
+			if err := proto.Unmarshal(msg.data, batch); err == nil && len(batch.Msgs) > 0 {
+				p = batch.Msgs[0]
+			} else if err := proto.Unmarshal(msg.data, p); err != nil {
 				continue
-			}
-
-			var uid, username string
-			var inner struct {
-				UId      string `json:"uid"`
-				Username string `json:"username"`
-			}
-			if p.MsgJson != "" {
-				_ = json.Unmarshal([]byte(p.MsgJson), &inner)
-				uid = inner.UId
-				username = inner.Username
 			}
 
 			// 20ms 去重
@@ -518,6 +517,7 @@ func proxyBackendToClient(ps *proxySession) {
 			ps.mu.Lock()
 			if last, exists := ps.lastForwarded[key]; exists && time.Since(last) < 20*time.Millisecond {
 				ps.mu.Unlock()
+				log.Info("[Broker] 🚫 去重跳过", "from", msg.from, "name", p.Name, "key", key[:30])
 				continue
 			}
 			ps.lastForwarded[key] = time.Now()
@@ -532,25 +532,76 @@ func proxyBackendToClient(ps *proxySession) {
 			}
 			ps.mu.Unlock()
 
-			// BinaryMessage — 直接把 backend 返回的 protobuf bytes 转给客户端
+			// ✅ 关键:不能把 BatchResp 原始 bytes 透传给 client
+			// client 只认单条 WSResp!backend 用 BatchResp 合并发送只是后端间优化
 			metrics.MessagesOut.Inc()
-			if err := ps.client.WriteMessage(websocket.BinaryMessage, msg.data); err != nil {
-				metrics.ErrorsTotal.WithLabelValues("client_write").Inc()
-				return // 客户端断了 → 整个 proxy 结束
+			if len(batch.Msgs) > 1 {
+				// BatchResp → 拆成单条 WSResp 重新序列化逐条发
+				for _, sub := range batch.Msgs {
+					if sub == nil {
+						continue
+					}
+					if subBytes, err := proto.Marshal(sub); err == nil {
+						err = ps.client.WriteMessage(websocket.BinaryMessage, subBytes)
+						if err != nil {
+							metrics.ErrorsTotal.WithLabelValues("client_write").Inc()
+							log.Warn("[Broker] ❌ WriteMessage failed", "from", msg.from, "name", sub.Name, "err", err)
+							return
+						}
+						log.Debug("[Broker] WriteMessage → client", "from", msg.from, "name", sub.Name, "uid", ps.uid, "bytes", len(subBytes))
+					}
+				}
+			} else {
+				// 单条 WSResp(或解 BatchResp 失败 → 直接透传)
+				err := ps.client.WriteMessage(websocket.BinaryMessage, msg.data)
+				if err != nil {
+					metrics.ErrorsTotal.WithLabelValues("client_write").Inc()
+					log.Warn("[Broker] ❌ WriteMessage failed", "from", msg.from, "name", p.Name, "err", err)
+					return
+				}
+				log.Debug("[Broker] WriteMessage → client", "from", msg.from, "name", p.Name, "uid", ps.uid, "bytes", len(msg.data))
 			}
 
 			// login 成功 → 记住 uid/username
-			if p.Name == "account.login" && p.Code == 0 && uid != "" {
-				ps.mu.Lock()
-				if ps.uid == "" {
-					ps.uid = uid
-					ps.username = username
-					if !diagLoginStored.Swap(true) {
-						log.Info("[Broker] 🎫 login uid 已存储", "uid", uid)
-					}
-					RegisterUID(ps.uid, ps.client)
+			// ⚠️ 必须遍历 BatchResp 所有条目 —— 并发压测下 login 可能不是第一条
+			checkLoginAndStore := func(rsp *wspb.WSResp) {
+				if rsp == nil || rsp.Name != "account.login" || rsp.Code != 0 {
+					return
 				}
-				ps.mu.Unlock()
+				var u, un string
+				if rsp.Msg != nil {
+					if lr, ok := rsp.Msg.(*wspb.WSResp_AccountLoginResp); ok {
+						u = lr.AccountLoginResp.Uid
+						un = lr.AccountLoginResp.Username
+					}
+				}
+				if u == "" && rsp.MsgJson != "" {
+					var inner struct {
+						UId      string `json:"uid"`
+						Username string `json:"username"`
+					}
+					_ = json.Unmarshal([]byte(rsp.MsgJson), &inner)
+					u = inner.UId
+					un = inner.Username
+				}
+				if u != "" {
+					ps.mu.Lock()
+					if ps.uid == "" {
+						ps.uid = u
+						ps.username = un
+						log.Info("[Broker] login uid 已存储", "uid", u)
+						RegisterUID(ps.uid, ps.client)
+					}
+					ps.mu.Unlock()
+				}
+			}
+			// 先检查取出来的 p(第一条)
+			checkLoginAndStore(p)
+			// 如果是 BatchResp,遍历其余条目
+			if len(batch.Msgs) > 1 {
+				for i := 1; i < len(batch.Msgs); i++ {
+					checkLoginAndStore(batch.Msgs[i])
+				}
 			}
 		}
 
