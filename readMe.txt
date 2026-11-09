@@ -226,3 +226,20 @@ curl -X POST http://127.0.0.1:9000/admin/broadcast `
       "endTime": 1750000000
     }
   }'
+
+
+
+  //工具说明 图集拆解
+  texture-unpacker 是一个 Node.js 工具，专门用来拆 TexturePacker 打包的图集，支持 Cocos2d-x、Cocos2d、PixiJS 等多种 plist 格式。
+  安装：
+
+bash
+npm install -g texture-unpacker
+使用：
+
+bash
+texture-unpacker -s 你的大图.png -f plist -d 你的文件.plist -o 输出目录
+参数说明：-s 指定合图 png，-f plist 声明数据格式，-d 指定 plist 文件，-o 指定输出目录。加上 -c 可以在拆分前清空输出目录。
+
+
+texture-unpacker -s starKeyLockRes.png -f plist -d starKeyLockRes.plist -o output
