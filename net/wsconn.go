@@ -346,6 +346,9 @@ func setRespOneof(p *proto.WSResp, name string, msg interface{}) error {
 		}
 		p.Msg = &proto.WSResp_RoomChatNew{RoomChatNew: m}
 	case "room.notice":
+		// room.notice 目前 handler 里用 map[string]any 推送
+		// setRespOneof 无法识别 map 类型，fallback json.Marshal 是预期内的
+		// 如果以后 RoomNotice 有 protobuf 类型定义可以再加 type switch
 		m, ok := msg.(*proto.RoomNotice)
 		if !ok {
 			return typeErr(name, msg)

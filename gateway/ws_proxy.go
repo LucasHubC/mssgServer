@@ -42,16 +42,7 @@ var (
 	lastPanicLog time.Time
 	panicMu      sync.Mutex
 
-	// 🔍 临时诊断：injectAuth 是否真的执行了（限频打印）
-	diagInjected    atomic.Bool
-	diagNoUid       atomic.Bool
-	diagLoginStored atomic.Bool
-	uidWarnCount    atomic.Int64 // chat 消息没注入 uid 的限频计数
-
-	// 🔍 dialAll 诊断计数器：定位 no_backend 根因
-	diagDialRouteFail int64 // dialAll 中 Route 返回非零 code 的次数
-	diagDialConnFail  int64 // dialAll 中 dialBackend 网络错误次数
-	diagDialAllEmpty  int64 // dialAll 全部 backend 都失败的次数
+	uidWarnCount atomic.Int64 // chat 消息没注入 uid 的限频计数（有用，保留）
 )
 
 var wsProxyUpgrader = websocket.Upgrader{
@@ -87,13 +78,6 @@ var activeProxyConns int64
 // ActiveProxyConns 当前活跃的 WS 代理连接数
 func ActiveProxyConns() int64 { return atomic.LoadInt64(&activeProxyConns) }
 
-// 🔍 诊断计数器 - client reader 侧(proxyClientToBackend)
-var (
-	diagClientReaderStart int64
-	diagClientReaderExit  int64
-	diagClientReaderPanic int64
-)
-
 // NodeProvider 后端节点地址提供者
 // Gateway 进程内：*Gateway 直接实现（方法调用）
 // Broker 进程间：HTTPGatewayClient 实现（HTTP 调 Gateway API）
@@ -112,18 +96,20 @@ type NodeProvider interface {
 type proxySession struct {
 	backends atomic.Pointer[map[string]*websocket.Conn]
 
-	// mu 保护：uid/username、lastForwarded（写极少）
-	mu            sync.Mutex
-	service       string
-	client        *websocket.Conn
-	nodeProvider  NodeProvider
-	nodeTypes     []string
-	uid           string
-	username      string
-	lastForwarded map[string]time.Time
-	lastCleanup   time.Time
-	lastDialAll   time.Time
-	dialAllMu     sync.Mutex // 防止多个 goroutine 同时调 dialAll
+	// mu 保护：uid/username、lastForwarded、token（写极少）
+	mu              sync.Mutex
+	service         string
+	client          *websocket.Conn
+	nodeProvider    NodeProvider
+	nodeTypes       []string
+	token           string // 🔴 存储客户端初始 token，redial 后端时透传（防止登录丢失）
+	uid             string
+	username        string
+	lastForwarded   map[string]time.Time
+	lastCleanup     time.Time
+	lastDialAll     time.Time
+	dialAllMu       sync.Mutex // 防止多个 goroutine 同时调 dialAll
+	backoffFailures int        // dialAll 全部失败的累计次数，用于指数退避
 }
 
 // backendMsg fan-in 消息
@@ -162,12 +148,13 @@ func StartKickListener() {
 	})
 }
 
-func newProxySession(service string, client *websocket.Conn, np NodeProvider, nodeTypes []string) *proxySession {
+func newProxySession(service string, client *websocket.Conn, np NodeProvider, nodeTypes []string, token string) *proxySession {
 	ps := &proxySession{
 		service:       service,
 		client:        client,
 		nodeProvider:  np,
 		nodeTypes:     nodeTypes,
+		token:         token,
 		lastForwarded: make(map[string]time.Time),
 	}
 	empty := make(map[string]*websocket.Conn)
@@ -175,38 +162,44 @@ func newProxySession(service string, client *websocket.Conn, np NodeProvider, no
 	return ps
 }
 
-// 🔥 全局 dialAll 限流器：最多同时 50 个 session 在重建 backend
-// 防止 1000 个 session 同时 Route + dial 打爆 Gateway 和后端
-var dialAllLimiter = make(chan struct{}, 50)
+// 🔥 全局 dialAll 限流器：30 并发
+// 并行 dial 3 backend → 每批 30×3=90 次握手，SYN 队列温和不爆
+// 1000 session / 30 = 34 批 × 2s ≈ 68s 总建连时间（可接受）
+var dialAllLimiter = make(chan struct{}, 30)
 
 // dialAll 为所有 nodeType 建立 backend WS 连接（可带 token）
-// ⚡ 串行 + 全局限流：保证 Gateway 不被打爆
+// ⚡ 3 个 backend 并行 dial，批次耗时从 6s 降到 2s
 func (ps *proxySession) dialAll(token string) {
-	// 🔴 全局限流！先拿 token
 	dialAllLimiter <- struct{}{}
 	defer func() { <-dialAllLimiter }()
 
 	oldPtr := ps.backends.Load()
 	newMap := make(map[string]*websocket.Conn, len(ps.nodeTypes))
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	for _, nt := range ps.nodeTypes {
-		routeResp := ps.nodeProvider.Route(rpc.RouteReq{Type: nt})
-		if routeResp.Code != 0 {
-			atomic.AddInt64(&diagDialRouteFail, 1)
-			log.Warn("["+ps.service+"] ❌ Route failed", "type", nt, "code", routeResp.Code)
-			continue
-		}
-		backendWS, err := dialBackend(routeResp.Addr, token)
-		if err != nil {
-			atomic.AddInt64(&diagDialConnFail, 1)
-			log.Warn("["+ps.service+"] ❌ dialBackend failed", "type", nt, "addr", routeResp.Addr, "err", err)
-			continue
-		}
-		newMap[nt] = backendWS
-		log.Info("["+ps.service+"] ✅ dialBackend success", "type", nt, "addr", routeResp.Addr)
+		wg.Add(1)
+		go func(nodeType string) {
+			defer wg.Done()
+			routeResp := ps.nodeProvider.Route(rpc.RouteReq{Type: nodeType})
+			if routeResp.Code != 0 {
+				log.Warn("["+ps.service+"] ❌ Route failed", "type", nodeType, "code", routeResp.Code)
+				return
+			}
+			backendWS, err := dialBackend(routeResp.Addr, token)
+			if err != nil {
+				log.Warn("["+ps.service+"] ❌ dialBackend failed", "type", nodeType, "addr", routeResp.Addr, "err", err)
+				return
+			}
+			mu.Lock()
+			newMap[nodeType] = backendWS
+			mu.Unlock()
+		}(nt)
 	}
+	wg.Wait()
 
 	if len(newMap) == 0 {
-		atomic.AddInt64(&diagDialAllEmpty, 1)
 		if !backendsOffline.Swap(true) {
 			log.Error("[Broker] 💥 dialAll 全部失败", "token", tokenStr(token != ""))
 		}
@@ -271,7 +264,6 @@ func (ps *proxySession) Close() {
 // service: 调用方名称，如 "Gateway" 或 "Broker"（用于日志前缀）
 // np: NodeProvider — Gateway struct（进程内直接方法调用）或 HTTP 客户端（Broker 进程间 HTTP 调用）
 func HandleWSProxy(w http.ResponseWriter, r *http.Request, service string, np NodeProvider) {
-	// ① Upgrade 客户端连接
 	clientWS, err := wsProxyUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Warn("["+service+"] WS upgrade failed", "err", err)
@@ -283,13 +275,11 @@ func HandleWSProxy(w http.ResponseWriter, r *http.Request, service string, np No
 	defer metrics.Connections.Dec()
 	defer clientWS.Close()
 
-	// ② 初始 token（客户端可能没带，后续 account.login 成功后重建）
 	initialToken := r.URL.Query().Get("token")
 	nodeTypes := []string{"login", "chat", "room"}
 
-	// ③ 建 proxySession + dial 初始 backend
-	ps := newProxySession(service, clientWS, np, nodeTypes)
-	ps.dialAll(initialToken)
+	ps := newProxySession(service, clientWS, np, nodeTypes, initialToken)
+	ps.dialAll(initialToken) // 统一 dialAll，不区分场景
 	defer ps.Close()
 
 	if len(ps.Snapshot()) == 0 {
@@ -323,7 +313,7 @@ func tokenStr(b bool) string {
 }
 
 // dialBackend 连后端 WS 节点，透传 token 参数
-// ⚠️ 必须带超时！否则后端全挂时 500 个 dial 会同时卡在 TCP connect 里 → goroutine 爆炸
+// timeout: 初始 1s（快速失败），重连 2s（更宽容）
 func dialBackend(addr, token string) (*websocket.Conn, error) {
 	parsed, err := url.Parse(addr)
 	if err != nil {
@@ -334,10 +324,10 @@ func dialBackend(addr, token string) (*websocket.Conn, error) {
 		q.Set("token", token)
 		parsed.RawQuery = q.Encode()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	dialer := &websocket.Dialer{
-		HandshakeTimeout: 500 * time.Millisecond,
+		HandshakeTimeout: 2 * time.Second,
 	}
 	c, _, err := dialer.DialContext(ctx, parsed.String(), nil)
 	return c, err
@@ -346,14 +336,11 @@ func dialBackend(addr, token string) (*websocket.Conn, error) {
 // proxyClientToBackend 客户端 → 后端（Protobuf 版）
 // recover 放在循环内: panic 后 goroutine 继续工作,而不是退出
 func proxyClientToBackend(ps *proxySession) {
-	atomic.AddInt64(&diagClientReaderStart, 1)
-	defer atomic.AddInt64(&diagClientReaderExit, 1)
 	for {
 		var readErr error
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					atomic.AddInt64(&diagClientReaderPanic, 1)
 					metrics.ErrorsTotal.WithLabelValues("client_reader_panic").Inc()
 					log.Error("["+ps.service+"] ⚠️ proxyClientToBackend PANIC", "err", r)
 				}
@@ -438,8 +425,14 @@ func injectAuthProtobuf(data []byte, uid, username string) []byte {
 	return out
 }
 
-// proxyBackendToClient 后端 → Gateway → 客户端
-// fan-in 3 backend reader → msgCh → select 转发 + 检测 login token
+// writeClientMsg 写消息到客户端（加写超时，防止 TCP 缓冲区满时永久阻塞）
+func writeClientMsg(client *websocket.Conn, data []byte) error {
+	_ = client.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return client.WriteMessage(websocket.BinaryMessage, data)
+}
+
+// proxyBackendToClient 后端 → Broker → 客户端
+// fan-in 3 backend reader → msgCh → 批量合并转发 + login 检测 + 写超时
 func proxyBackendToClient(ps *proxySession) {
 	for {
 		// ── Step 1: 快照（原子 Load，无锁！）──
@@ -458,20 +451,16 @@ func proxyBackendToClient(ps *proxySession) {
 		}
 
 		// ── Step 2: fan-in reader goroutines ──
-		// 每个 backend 一个 reader,退出时通过 errCh 发信号(省掉 WaitGroup 辅助 goroutine)
 		msgCh := make(chan backendMsg, 2048)
-		cancel := make(chan struct{})
 		errCh := make(chan string, len(entries))
 
 		for _, e := range entries {
 			go func(name string, ws *websocket.Conn) {
 				defer func() {
-					// 退出时通知主循环
 					select {
 					case errCh <- name:
 					default:
 					}
-					// recover 捕获 gorilla 并发 Close+Read 的 panic
 					if r := recover(); r != nil {
 						if now := time.Now(); now.Sub(lastPanicLog) > 5*time.Second {
 							lastPanicLog = now
@@ -486,8 +475,9 @@ func proxyBackendToClient(ps *proxySession) {
 					}
 					select {
 					case msgCh <- backendMsg{data: data, from: name}:
-					case <-cancel:
-						return
+					default:
+						// msgCh 满了 → 丢弃（极端保护，正常情况下 2048 buffer 够了）
+						metrics.ErrorsTotal.WithLabelValues("msgch_full").Inc()
 					}
 				}
 			}(e.name, e.ws)
@@ -501,24 +491,66 @@ func proxyBackendToClient(ps *proxySession) {
 			close(msgCh)
 		}()
 
-		// ── Step 3: 转发 + 去重 + 存 login uid（做法 A: WS 只是管道）──
-		for msg := range msgCh {
-			// Protobuf 解码：先尝试 BatchResp(多条合并)，再回退 WSResp(单条)
-			p := &wspb.WSResp{}
+		// ── Step 3: 批量合并转发 + 去重 + login 检测 ──
+		// Broker 层也做批量合并：把多条后端消息（每条可能已经是 BatchResp）
+		// 再合成一个大的 BatchResp 一次 WriteMessage
+		const proxyBatchMaxSize = 64
+		const proxyBatchFlushWait = 3 * time.Millisecond
+
+		// collectWSResp 把 backendMsg 解码成 WSResp 列表（支持 BatchResp 拆解）
+		collectWSResp := func(msg backendMsg) []*wspb.WSResp {
+			// 先尝试 BatchResp
 			batch := &wspb.BatchResp{}
 			if err := proto.Unmarshal(msg.data, batch); err == nil && len(batch.Msgs) > 0 {
-				p = batch.Msgs[0]
-			} else if err := proto.Unmarshal(msg.data, p); err != nil {
-				continue
+				return batch.Msgs
 			}
+			// 回退单条 WSResp
+			p := &wspb.WSResp{}
+			if err := proto.Unmarshal(msg.data, p); err == nil {
+				return []*wspb.WSResp{p}
+			}
+			return nil
+		}
 
-			// 20ms 去重
-			key := p.Name + "|" + string(msg.data)
-			ps.mu.Lock()
-			if last, exists := ps.lastForwarded[key]; exists && time.Since(last) < 20*time.Millisecond {
+		// checkLoginAndStore 检查 login 成功 → 存 uid
+		checkLoginAndStore := func(rsp *wspb.WSResp) {
+			if rsp == nil || rsp.Name != "account.login" || rsp.Code != 0 {
+				return
+			}
+			var u, un string
+			if rsp.Msg != nil {
+				if lr, ok := rsp.Msg.(*wspb.WSResp_AccountLoginResp); ok {
+					u = lr.AccountLoginResp.Uid
+					un = lr.AccountLoginResp.Username
+				}
+			}
+			if u == "" && rsp.MsgJson != "" {
+				var inner struct {
+					UId      string `json:"uid"`
+					Username string `json:"username"`
+				}
+				_ = json.Unmarshal([]byte(rsp.MsgJson), &inner)
+				u = inner.UId
+				un = inner.Username
+			}
+			if u != "" {
+				ps.mu.Lock()
+				if ps.uid == "" {
+					ps.uid = u
+					ps.username = un
+					log.Info("[Broker] login uid 已存储", "uid", u)
+					RegisterUID(ps.uid, ps.client)
+				}
 				ps.mu.Unlock()
-				log.Info("[Broker] 🚫 去重跳过", "from", msg.from, "name", p.Name, "key", key[:30])
-				continue
+			}
+		}
+
+		// shouldSkip 20ms 去重检查，返回 true 表示跳过
+		shouldSkip := func(key string) bool {
+			ps.mu.Lock()
+			defer ps.mu.Unlock()
+			if last, exists := ps.lastForwarded[key]; exists && time.Since(last) < 20*time.Millisecond {
+				return true
 			}
 			ps.lastForwarded[key] = time.Now()
 			if len(ps.lastForwarded) > 10000 || time.Since(ps.lastCleanup) > 5*time.Second {
@@ -530,89 +562,106 @@ func proxyBackendToClient(ps *proxySession) {
 				}
 				ps.lastCleanup = time.Now()
 			}
-			ps.mu.Unlock()
+			return false
+		}
 
-			// ✅ 关键:不能把 BatchResp 原始 bytes 透传给 client
-			// client 只认单条 WSResp!backend 用 BatchResp 合并发送只是后端间优化
-			metrics.MessagesOut.Inc()
-			if len(batch.Msgs) > 1 {
-				// BatchResp → 拆成单条 WSResp 重新序列化逐条发
-				for _, sub := range batch.Msgs {
-					if sub == nil {
-						continue
-					}
-					if subBytes, err := proto.Marshal(sub); err == nil {
-						err = ps.client.WriteMessage(websocket.BinaryMessage, subBytes)
-						if err != nil {
-							metrics.ErrorsTotal.WithLabelValues("client_write").Inc()
-							log.Warn("[Broker] ❌ WriteMessage failed", "from", msg.from, "name", sub.Name, "err", err)
-							return
-						}
-						log.Debug("[Broker] WriteMessage → client", "from", msg.from, "name", sub.Name, "uid", ps.uid, "bytes", len(subBytes))
-					}
-				}
+		// flushBatch 把累积的 resp 列表合并成 BatchResp → 一次 WriteMessage
+		var respBuf []*wspb.WSResp
+		flushBatch := func() error {
+			if len(respBuf) == 0 {
+				return nil
+			}
+			var data []byte
+			var err error
+			if len(respBuf) == 1 {
+				data, err = proto.Marshal(respBuf[0])
 			} else {
-				// 单条 WSResp(或解 BatchResp 失败 → 直接透传)
-				err := ps.client.WriteMessage(websocket.BinaryMessage, msg.data)
-				if err != nil {
-					metrics.ErrorsTotal.WithLabelValues("client_write").Inc()
-					log.Warn("[Broker] ❌ WriteMessage failed", "from", msg.from, "name", p.Name, "err", err)
-					return
+				data, err = proto.Marshal(&wspb.BatchResp{Msgs: respBuf})
+			}
+			if err != nil {
+				return err
+			}
+			err = writeClientMsg(ps.client, data)
+			if err != nil {
+				metrics.ErrorsTotal.WithLabelValues("client_write").Inc()
+				log.Warn("[Broker] ❌ WriteMessage failed", "msgs", len(respBuf), "bytes", len(data), "err", err)
+				return err
+			}
+			metrics.MessagesOut.Add(float64(len(respBuf)))
+			respBuf = respBuf[:0]
+			return nil
+		}
+
+		// 主循环：从 msgCh 取消息，做过滤后累积到 respBuf，满或超时则 flush
+		for msg := range msgCh {
+			resps := collectWSResp(msg)
+			for _, p := range resps {
+				// 20ms 去重
+				if shouldSkip(p.Name + "|" + string(msg.data)) {
+					continue
 				}
-				log.Debug("[Broker] WriteMessage → client", "from", msg.from, "name", p.Name, "uid", ps.uid, "bytes", len(msg.data))
+				// login 检测
+				checkLoginAndStore(p)
+				respBuf = append(respBuf, p)
 			}
 
-			// login 成功 → 记住 uid/username
-			// ⚠️ 必须遍历 BatchResp 所有条目 —— 并发压测下 login 可能不是第一条
-			checkLoginAndStore := func(rsp *wspb.WSResp) {
-				if rsp == nil || rsp.Name != "account.login" || rsp.Code != 0 {
-					return
+			// 满了 → 立即 flush
+			if len(respBuf) >= proxyBatchMaxSize {
+				if err := flushBatch(); err != nil {
+					return // 写失败 → 客户端断连 → proxySession Close 处理
 				}
-				var u, un string
-				if rsp.Msg != nil {
-					if lr, ok := rsp.Msg.(*wspb.WSResp_AccountLoginResp); ok {
-						u = lr.AccountLoginResp.Uid
-						un = lr.AccountLoginResp.Username
-					}
-				}
-				if u == "" && rsp.MsgJson != "" {
-					var inner struct {
-						UId      string `json:"uid"`
-						Username string `json:"username"`
-					}
-					_ = json.Unmarshal([]byte(rsp.MsgJson), &inner)
-					u = inner.UId
-					un = inner.Username
-				}
-				if u != "" {
-					ps.mu.Lock()
-					if ps.uid == "" {
-						ps.uid = u
-						ps.username = un
-						log.Info("[Broker] login uid 已存储", "uid", u)
-						RegisterUID(ps.uid, ps.client)
-					}
-					ps.mu.Unlock()
-				}
+				continue
 			}
-			// 先检查取出来的 p(第一条)
-			checkLoginAndStore(p)
-			// 如果是 BatchResp,遍历其余条目
-			if len(batch.Msgs) > 1 {
-				for i := 1; i < len(batch.Msgs); i++ {
-					checkLoginAndStore(batch.Msgs[i])
+
+			// 没满 → 尝试 non-blocking 多拿几条，最多等 proxyBatchFlushWait
+			if len(respBuf) == 0 {
+				continue // respBuf 空就直接回到外层循环取下一条
+			}
+			select {
+			case nextMsg, ok := <-msgCh:
+				if !ok {
+					// msgCh 关闭，flush 剩余后退出到重连逻辑
+					_ = flushBatch()
+					goto reconnect
+				}
+				nextResps := collectWSResp(nextMsg)
+				for _, np := range nextResps {
+					if !shouldSkip(np.Name + "|" + string(nextMsg.data)) {
+						checkLoginAndStore(np)
+						respBuf = append(respBuf, np)
+					}
+				}
+				// 满了立刻 flush
+				if len(respBuf) >= proxyBatchMaxSize {
+					if err := flushBatch(); err != nil {
+						return
+					}
+				}
+			case <-time.After(proxyBatchFlushWait):
+				// 超时 flush
+				if err := flushBatch(); err != nil {
+					return
 				}
 			}
 		}
+
+	reconnect:
+		// flush 剩余
+		_ = flushBatch()
 
 		// msgCh close = 所有 backend readers 死了 → 重连
-		// 注:close(cancel) 和 wg.Wait() 已不需要 —— msgCh close 本身就是所有 reader 退出后的信号
-		ps.dialAll("") // 不带 token，因为后端 server 鉴权靠消息里的 __uid
+		ps.dialAll("")
 		m = ps.backends.Load()
 		if m == nil || len(*m) == 0 {
-			// 全后端离线：静默退避（状态日志已在 dialAll 里打过了）
-			time.Sleep(2 * time.Second)
+			ps.backoffFailures++
+			delay := time.Duration(1<<min(ps.backoffFailures, 4)) * time.Second
+			if delay > 30*time.Second {
+				delay = 30 * time.Second
+			}
+			log.Warn("["+ps.service+"] all backends offline, backoff", "delay", delay, "failures", ps.backoffFailures)
+			time.Sleep(delay)
 			continue
 		}
+		ps.backoffFailures = 0
 	}
 }

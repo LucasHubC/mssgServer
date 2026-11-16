@@ -10,8 +10,15 @@ import (
 	"time"
 )
 
+// httpClient 统一复用的 HTTP 客户端
+// ⚡ 关键:自定义 Transport 加连接池，心跳 5s 一次可复用 TCP 连接
 var httpClient = &http.Client{
 	Timeout: 3 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 50, // 同一 Gateway 最多保持 50 个空闲连接
+		IdleConnTimeout:     60 * time.Second,
+	},
 }
 
 // NodeRegisterReq 后端节点启动时向 Gateway 注册自己
@@ -69,4 +76,17 @@ func Heartbeat(gatewayURL string, req NodeHeartbeatReq) {
 		return
 	}
 	resp.Body.Close()
+}
+
+// Deregister 后端节点优雅下线时主动注销
+func Deregister(gatewayURL string, req NodeHeartbeatReq) {
+	body, _ := json.Marshal(req)
+	url := fmt.Sprintf("%s/gateway/deregister", gatewayURL)
+	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		log.Warn("deregister failed (gateway unreachable?)", "err", err)
+		return
+	}
+	resp.Body.Close()
+	log.Info("node deregistered from gateway", "type", req.Type, "addr", req.Addr)
 }

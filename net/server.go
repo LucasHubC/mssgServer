@@ -40,7 +40,10 @@ func (s *Server) Start() {
 
 	s.httpSrv = &http.Server{
 		Addr:           s.address,
-		MaxHeaderBytes: 1 << 20,
+		MaxHeaderBytes: 1 << 20,           // 1MB header
+		ReadTimeout:    10 * time.Second,  // 整请求（含 body）读完超时，防半连接
+		WriteTimeout:   10 * time.Second,  // 整响应写完超时
+		IdleTimeout:    120 * time.Second, // Keep-Alive 空闲超时（Upgrade 前 HTTP 层用）
 	}
 
 	http.HandleFunc("/", s.wsHandler)

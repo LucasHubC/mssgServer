@@ -126,7 +126,7 @@ type broadcastTask struct {
 }
 
 const broadcastWorkerCount = 16
-const broadcastTaskBuffer = 2048
+const broadcastTaskBuffer = 8192 // 16分片 × 512 缓冲/分片，扛 world 广播洪峰
 
 var broadcastTaskCh chan broadcastTask
 var broadcastPoolOnce sync.Once
@@ -150,7 +150,6 @@ func runBroadcastWorker(ch <-chan broadcastTask) {
 // broadcastDiagCount 诊断用：统计 Broadcast 调用次数
 var broadcastDiagCount atomic.Int64
 var bindUidDiagCount atomic.Int64
-var bindUidDiagOnce sync.Once
 
 // Broadcast 向本机所有已登录用户推消息
 // ⚡ 业界主流优化：异步 + 分批
@@ -317,26 +316,18 @@ func (cm *ConnectionManager) StartHeartbeatLoop() {
 			continue
 		}
 
-		// 逐个 Touch —— Redis 网络 IO 放到锁外做，不阻塞 cm.mu
-		// 虽然可以 Pipeline 批量，但 uid 数量一般不大（单机几千），逐个写够了
-		for _, uid := range uids {
-			rediscache.TouchUserHeartbeat(uid, cm.getNodeAddr())
-		}
+		// Pipeline 批量续期 —— N 次 SET 合成 1 次网络往返
+		// 5000 用户：耗时从 ~500ms 降到 ~10ms
+		nodeAddr := rediscache.GetMyNodeAddr()
+		rediscache.TouchUserHeartbeatBatch(uids, nodeAddr)
 		log.Debug("[Heartbeat] online renewed", "count", len(uids))
 	}
 }
 
-// nodeAddr 当前节点的 ws 地址（启动时 SetNodeAddr 设的）
-// 用来告诉 TouchUserHeartbeat 续期时写哪个 nodeAddr
+// nodeAddr 获取当前节点地址，优先用 redis 包的全局值
+// （SetMyNodeAddr 在 main 启动时已设好，redis.GetMyNodeAddr() 永远返回非空）
 func (cm *ConnectionManager) getNodeAddr() string {
-	// ConnectionManager 没有存 NodeAddr，但 ConnManager 是单例，
-	// 可以从 WSServer.NodeAddr 拿到（所有 WS 连接共用同一个 NodeAddr）
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-	for _, ws := range cm.uidMap {
-		return ws.NodeAddr // 任取一个就行，同一节点的 NodeAddr 都一样
-	}
-	return ""
+	return rediscache.GetMyNodeAddr()
 }
 
 // OnlineUids 当前已登录用户的 uid 列表

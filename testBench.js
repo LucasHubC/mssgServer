@@ -135,6 +135,10 @@ const stats = {
     startAt: 0,
 };
 
+// uidMap: idx → 后端返回的真实 uid（如 uid_a1b2c3）
+// private.send 必须用真实 uid，Redis GetUserNode 才能查到目标方是否在线
+const uidMap = new Map();
+
 let globalSeq = 0;
 function nextSeq() { return ++globalSeq; }
 
@@ -221,6 +225,10 @@ function connect(url, idx, interval) {
                         if (data.code === 0 && data.msg && data.msg.token) {
                             loginDone = true;
                             stats.loginOk++;
+                            // ✅ 存真实 uid（后端返回格式: uid_xxx，不是 username bench_X）
+                            // protobufjs 动态解码字段名是 camelCase: uId
+                            const realUid = data.msg.uId || data.msg.uid || data.msg.UId || '';
+                            if (realUid) uidMap.set(idx, realUid);
                             const tgt = (idx + 1) % args.conns;
                             sendTimer = setInterval(() => {
                                 if (ws.readyState !== WebSocket.OPEN) return;
@@ -228,7 +236,11 @@ function connect(url, idx, interval) {
                                     ws.send(encodeMsg(nextSeq(), 'chat.world.send', { content: `bench_${idx}_${Date.now()%100000}` }));
                                     stats.sent++; stats.sentWorld++;
                                 } else {
-                                    ws.send(encodeMsg(nextSeq(), 'chat.private.send', { toUid: `bench_${tgt}`, content: `hi_${idx}` }));
+                                    // ✅ 用目标方的真实 uid 发，而不是 username
+                                    // 目标方可能还没 login 成功（uidMap 里还没有），跳过等下一轮
+                                    const tgtUid = uidMap.get(tgt);
+                                    if (!tgtUid) return; // setInterval 下一轮再发
+                                    ws.send(encodeMsg(nextSeq(), 'chat.private.send', { toUid: tgtUid, content: `hi_${idx}` }));
                                     stats.sent++; stats.sentPrivate++;
                                 }
                             }, interval);

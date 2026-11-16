@@ -102,6 +102,27 @@ func (g *Gateway) Route(req rpc.RouteReq) *rpc.RouteResp {
 	return &rpc.RouteResp{Code: 0, Addr: picked.Addr}
 }
 
+// Deregister 后端节点优雅下线时主动注销
+// 比 CleanupLoop 等 10s 更快让 Gateway 摘除这个节点
+func (g *Gateway) Deregister(req rpc.NodeHeartbeatReq) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	nodes := g.nodes[req.Type]
+	for i, n := range nodes {
+		if n.Addr == req.Addr {
+			// 从切片中移除
+			g.nodes[req.Type] = append(nodes[:i], nodes[i+1:]...)
+			log.Info("[Gateway] node deregistered", "type", req.Type, "addr", req.Addr)
+			if len(g.nodes[req.Type]) == 0 {
+				delete(g.nodes, req.Type)
+			}
+			return
+		}
+	}
+	log.Warn("[Gateway] deregister: node not found", "type", req.Type, "addr", req.Addr)
+}
+
 // CleanupLoop 定期清理超时节点
 // ⚡ 优化:先 RLock 扫描,再 Lock 更新,减少对 Route 的阻塞
 func (g *Gateway) CleanupLoop() {
@@ -202,6 +223,16 @@ func (g *Gateway) HandleRoute(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, g.Status())
+}
+
+func (g *Gateway) HandleDeregister(w http.ResponseWriter, r *http.Request) {
+	var req rpc.NodeHeartbeatReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	g.Deregister(req)
+	w.WriteHeader(http.StatusOK)
 }
 
 // HandleDispatch GET /gateway/dispatch?uid=xxx&token=tk_xxx

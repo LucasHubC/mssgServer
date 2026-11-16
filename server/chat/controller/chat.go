@@ -110,7 +110,9 @@ func (c *Chat) sendPrivate(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		Timestamp: time.Now().Unix(),
 	}
 
-	log.Info("[Chat] private", "from", username, "to", body.ToUid, "online", found)
+	// 热路径：不再打 Info 日志（3000+ QPS 下每条 IO 是瓶颈）
+	// 如需统计 online 比例，用 metrics 或临时开 Debug
+	log.Debug("[Chat] private", "from", username, "to", body.ToUid, "online", found)
 	if found {
 		net.ConnManager.PushToUid(body.ToUid, "chat.private.new", msg)
 	}

@@ -84,10 +84,10 @@ func newWsServer(wsConn *websocket.Conn) *WSServer {
 	return &WSServer{
 		startTime: time.Now(),
 		wsConn:    wsConn,
-		outChan:   make(chan *WsMsgResp, 32768), // 业界主流：buffer 够大扛 broadcast 洪峰（32768 指针 ≈ 256KB）
+		outChan:   make(chan *WsMsgResp, 16384), // 16384 指针 × 8B = 128KB/conn，扛 2s world 广播洪峰，比 32768 省 128KB/conn
 		property:  make(map[string]interface{}),
 		Seq:       0,
-		limiter:   rate.NewLimiter(500, 2000),
+		limiter:   rate.NewLimiter(100, 500), // 正常玩家 1s 5-10 条足够，100/s 防刷 DB，突发 500 条扛洪峰
 		done:      make(chan struct{}),
 	}
 }
@@ -147,7 +147,6 @@ func (s *WSServer) safeSend(msg *WsMsgResp) bool {
 	default:
 		s.sendMu.Unlock()
 		metrics.DroppedMessages.WithLabelValues("outchan_full").Inc()
-		// 限频日志：每累计 100 次丢包才打 1 条，避免刷屏
 		if atomic.AddInt64(&dropLogCount, 1)%100 == 0 {
 			log.Warn("outChan full, drop message", "addr", s.Addr(), "name", msg.Body.Name, "totalDropped", atomic.LoadInt64(&dropLogCount))
 		}
@@ -204,8 +203,8 @@ func (s *WSServer) pingLoop() {
 }
 
 const (
-	batchMaxSize   = 16                   // 每帧最多合并 16 条
-	batchFlushWait = 2 * time.Millisecond // 没满但等了 2ms 立刻刷
+	batchMaxSize   = 32                   // 每帧最多合并 32 条，减少一半 TCP syscall
+	batchFlushWait = 5 * time.Millisecond // 没满但等了 5ms 立刻刷，低负载也能攒更多
 )
 
 // writeMsgLoop 写连接 — 支持批量合并减少 socket syscall
@@ -247,19 +246,11 @@ func (s *WSServer) writeMsgLoop() {
 			flush()
 			return
 		}
-		// 🔍 诊断:序列化前确认 Name
-		if msg.Body.Name == "" && msg.Body.Code == 0 {
-			log.Info("[writeMsgLoop] ⚠️ RespBody.Name 为空", "code", msg.Body.Code, "msg_type", fmt.Sprintf("%T", msg.Body.Msg))
-		}
 		p, err := RespBodyToProto(msg.Body)
 		if err != nil {
 			log.Error("proto convert resp failed", "err", err)
 		} else {
 			batch = append(batch, p)
-			// 🔍 诊断:序列化后确认 protobuf Name
-			if p.Name == "" && msg.Body.Name != "" {
-				log.Info("[writeMsgLoop] ⚠️ protobuf p.Name 为空但 b.Name 不为空", "b.Name", msg.Body.Name)
-			}
 		}
 
 		// 尝试再拿 batchMaxSize-1 条（非阻塞 + 超时）
@@ -399,9 +390,7 @@ func (s *WSServer) readMsgLoop() {
 	s.Close()
 }
 
-// Close 关闭连接，幂等（sync.Once 保证只执行一次）
-// 关闭顺序：先在 sendMu 锁内置 closed=true 并 close(outChan)（让 writeMsgLoop 退出，
-// 同时阻止后续 safeSend），再关 wsConn，再关 done 通知 wsHandler
+// Close 幂等关闭：sendMu 锁住 → closed=true → close(outChan) → 解锁 → 关 done → 关 ws
 func (s *WSServer) Close() {
 	s.once.Do(func() {
 		metrics.ConnectionLifetime.Observe(time.Since(s.startTime).Seconds())
@@ -409,9 +398,8 @@ func (s *WSServer) Close() {
 		s.closed = true
 		close(s.outChan)
 		s.sendMu.Unlock()
-
-		s.wsConn.Close()
 		close(s.done)
+		s.wsConn.Close()
 	})
 }
 
