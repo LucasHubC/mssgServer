@@ -50,6 +50,10 @@ type WSServer struct {
 
 	outChan chan *WsMsgResp
 
+	// Seq 序列号 —— 不再用 atomic！
+	// writeMsgLoop 是单 goroutine 消费 outChan，Seq 自增在那里完成，完全不需要 CAS
+	// Seq 序列号 —— 不再用 atomic！
+	// writeMsgLoop 是单 goroutine 消费 outChan，Seq 自增在那里完成，完全不需要 CAS
 	Seq int64
 
 	property map[string]interface{}
@@ -155,18 +159,17 @@ func (s *WSServer) safeSend(msg *WsMsgResp) bool {
 }
 
 // Push 向本连接推送消息（非阻塞，outChan 满或连接已关时丢弃）
-// 丢包日志在 safeSend 里限频（每 100 条打一条），这里不再重复打
+// Seq 在 writeMsgLoop 里统一赋值（单 goroutine，不需要 atomic）
 func (s *WSServer) Push(name string, data interface{}) {
-	seq := atomic.AddInt64(&s.Seq, 1) // 🔴 并发安全的序列号
 	rsp := &WsMsgResp{
 		Body: &RespBody{
-			Seq:  seq,
+			Seq:  0, // 占位，writeMsgLoop 里统一填
 			Name: name,
 			Code: 0,
 			Msg:  data,
 		},
 	}
-	s.safeSend(rsp) // safeSend 返回值可忽略（丢包日志在里面限频了）
+	s.safeSend(rsp)
 }
 
 // 通道一旦建立 那么收发消息都要持续去监听通道
@@ -215,6 +218,11 @@ func (s *WSServer) writeMsgLoop() {
 	flush := func() {
 		if len(batch) == 0 {
 			return
+		}
+		// 🔴 统一给每条消息赋 Seq（单 goroutine，直接 s.Seq++）
+		for _, p := range batch {
+			p.Seq = s.Seq
+			s.Seq++
 		}
 		metrics.BatchSize.Observe(float64(len(batch)))
 		var data []byte

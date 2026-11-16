@@ -9,6 +9,7 @@ import (
 	"mssgServer/infra/redis"
 	"mssgServer/infra/rpc"
 	wspb "mssgServer/proto"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,10 +26,64 @@ import (
 //  按消息 name 前缀实时路由到对应后端节点
 // ═══════════════════════════════════════════════════════════
 
-// uidToClientWS Broker 侧 uid→client WS 注册表
-// 做法 A 后 admin/kick 必须踢 client WS（踢 backend WS 只会触发 dialAll 重连，client 不会断）
-// Broker login 成功时 RegisterUID，proxySession Close 时 UnregisterUID
-// StartKickListener() 启动一个 goroutine 订阅 Redis kick 消息
+// ═══════════════════════════════════════════════════════════
+//
+//	WS 连接建立限流 —— 两层足够，简单可靠
+//	L1: 全局并发 WS 连接数（防打爆进程）
+//	L2: 单 IP 并发连接数（防单 IP 恶意刷）
+//
+// ═══════════════════════════════════════════════════════════
+const (
+	maxGlobalWSConns = 5000 // L1: 全局最大 WS 连接数
+	maxPerIPConns    = 2000 // L2: 单 IP 最大并发（压测单 IP 1000，够；生产改 100）
+)
+
+var (
+	ipConnCount sync.Map // map[string]int64 — 单 IP 当前连接数
+)
+
+// tryAcquireWS 尝试获取 WS 连接配额（L1+L2 两层全过才返回 true）
+func tryAcquireWS(ip string) (bool, string) {
+	// L1: 全局并发数
+	if atomic.LoadInt64(&activeProxyConns) >= maxGlobalWSConns {
+		return false, "global_full"
+	}
+
+	// L2: 单 IP 并发数（CAS 原子操作，避免竞态）
+	for {
+		var cur int64
+		v, loaded := ipConnCount.LoadOrStore(ip, int64(1))
+		if !loaded {
+			// 第一次存 1，成功
+			break
+		}
+		cur = v.(int64)
+		if cur >= maxPerIPConns {
+			return false, "ip_full"
+		}
+		if ipConnCount.CompareAndSwap(ip, cur, cur+1) {
+			break
+		}
+		// CAS 失败，重新循环
+	}
+
+	atomic.AddInt64(&activeProxyConns, 1)
+	return true, ""
+}
+
+// releaseWS 释放 WS 连接配额
+func releaseWS(ip string) {
+	atomic.AddInt64(&activeProxyConns, -1)
+	if v, ok := ipConnCount.Load(ip); ok {
+		cnt := v.(int64) - 1
+		if cnt <= 0 {
+			ipConnCount.Delete(ip)
+		} else {
+			ipConnCount.Store(ip, cnt)
+		}
+	}
+}
+
 var (
 	uidToClientWS    sync.Map // map[string]*websocket.Conn
 	kickListenerOnce sync.Once
@@ -260,17 +315,38 @@ func (ps *proxySession) Close() {
 	}
 }
 
+// clientIP 从 request 里提取客户端 IP（支持 X-Forwarded-For）
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// 取第一个 IP
+		if idx := strings.IndexByte(xff, ','); idx > 0 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return ip
+}
+
 // HandleWSProxy 智能 WS 代理入口（Gateway + Broker 共用这个函数！）
 // service: 调用方名称，如 "Gateway" 或 "Broker"（用于日志前缀）
 // np: NodeProvider — Gateway struct（进程内直接方法调用）或 HTTP 客户端（Broker 进程间 HTTP 调用）
 func HandleWSProxy(w http.ResponseWriter, r *http.Request, service string, np NodeProvider) {
+	// 🔒 三层限流检查（在 Upgrade 之前拦截，避免无效握手消耗资源）
+	ip := clientIP(r)
+	if ok, reason := tryAcquireWS(ip); !ok {
+		metrics.ErrorsTotal.WithLabelValues("ws_rate_" + reason).Inc()
+		log.Warn("["+service+"] 🚫 WS rejected", "ip", ip, "reason", reason, "global", activeProxyConns)
+		w.WriteHeader(http.StatusTooManyRequests) // 429
+		return
+	}
+	defer releaseWS(ip)
+
 	clientWS, err := wsProxyUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Warn("["+service+"] WS upgrade failed", "err", err)
 		return
 	}
-	atomic.AddInt64(&activeProxyConns, 1)
-	defer atomic.AddInt64(&activeProxyConns, -1)
 	metrics.Connections.Inc()
 	defer metrics.Connections.Dec()
 	defer clientWS.Close()
@@ -352,7 +428,7 @@ func proxyClientToBackend(ps *proxySession) {
 				return
 			}
 
-			// Protobuf 解码拿到 name 路由
+			// 🔴 一次 Unmarshal 搞定：既拿 name 路由，又保留 p 结构体后面直接填 uid
 			p := &wspb.WSReq{}
 			if proto.Unmarshal(data, p) != nil {
 				return
@@ -366,21 +442,23 @@ func proxyClientToBackend(ps *proxySession) {
 				return
 			}
 
-			// 如果已经 login，注入 __uid/__username
+			// 直接在已解码的 p 上填 uid，再 Marshal —— 省掉 injectAuthProtobuf 的二次 Unmarshal！
 			ps.mu.Lock()
 			uid, username := ps.uid, ps.username
 			ps.mu.Unlock()
 			if uid != "" {
-				data = injectAuthProtobuf(data, uid, username)
+				if p.AuthUid == "" { // 还没填过（直连客户端没有）
+					p.AuthUid = uid
+					p.AuthUsername = username
+					data, _ = proto.Marshal(p)
+				}
 			} else if strings.HasPrefix(p.Name, "chat.") {
-				// 限频:首次 + 每 100 条打 1 条
 				if n := uidWarnCount.Add(1); n <= 1 || n%100 == 0 {
 					log.Warn("[Broker] ps.uid 为空,chat 消息没注入 uid", "name", p.Name, "total", n)
 				}
 			}
 
-			// BinaryMessage — Protobuf 是二进制
-			if err := backend.WriteMessage(websocket.BinaryMessage, data); err != nil {
+			if err := writeBackendMsg(backend, data); err != nil {
 				metrics.ErrorsTotal.WithLabelValues("backend_write").Inc()
 			}
 		}()
@@ -429,6 +507,12 @@ func injectAuthProtobuf(data []byte, uid, username string) []byte {
 func writeClientMsg(client *websocket.Conn, data []byte) error {
 	_ = client.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	return client.WriteMessage(websocket.BinaryMessage, data)
+}
+
+// writeBackendMsg 写消息到后端（同样加写超时，对称防护）
+func writeBackendMsg(backend *websocket.Conn, data []byte) error {
+	_ = backend.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return backend.WriteMessage(websocket.BinaryMessage, data)
 }
 
 // proxyBackendToClient 后端 → Broker → 客户端
