@@ -1,9 +1,9 @@
 package redis
 
 import (
+	"encoding/json"
 	"mssgServer/config/db"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -66,44 +66,52 @@ func TestBindUser_DistributedLock(t *testing.T) {
 }
 
 // ────────────────────────────────────────
-//  Pub/Sub：自己发的消息，自己也能收到（业务层要判断 FromNode）
+//  Pub/Sub 订阅过滤逻辑
+//
+//  重要说明：
+//   1. 测试用 db.RDB.Publish 直接发，绕开 PublishBroadcast 的异步队列。
+//      因为 PublishBroadcast 内部 StartAsyncBroadcast (redis.go:231) 会强制
+//      覆盖 msg.FromNode = myNodeAddr，导致我们传的 FromNode 被丢弃。
+//      生产代码里这个覆盖是对的（业务层不该自己管 FromNode），但测试要精确
+//      控制 FromNode 验证 SubscribeBroadcast 的过滤逻辑，必须直接 Publish。
+//   2. 绝不 Close 全局 db.RDB —— 它由 TestMain 统一 Init/Close。
+//   3. 不用 WaitGroup —— SubscribeBroadcast 外层 for {} 永不退出，
+//      我们只需要等"消息到达"这个事件，不需要等 goroutine 退出。
+//      goroutine 会随进程退出被清理，不影响测试结果。
 // ────────────────────────────────────────
 
-func TestPublishSubscribe_EchoFromSelf(t *testing.T) {
-	convey.Convey("Publisher 也会收到自己 Publish 的消息", t, func() {
-		SetMyNodeAddr("ws://self-test:9999")
+func TestPublishSubscribe_FromOtherNode(t *testing.T) {
+	// 只测正向：别的节点发的 → SubscribeBroadcast 不过滤 → handler 被调用
+	SetMyNodeAddr("ws://self-test:9999")
 
-		var wg sync.WaitGroup
-		wg.Add(1)
-
-		received := make(chan BroadcastMsg, 1)
-		go func() {
-			defer wg.Done()
-			SubscribeBroadcast(func(msg BroadcastMsg) {
-				received <- msg
-			})
-		}()
-
-		// 等订阅建好
-		time.Sleep(300 * time.Millisecond)
-
-		PublishBroadcast(BroadcastMsg{
-			Action: "kick",
-			Target: "user_abc",
-		})
-
-		select {
-		case msg := <-received:
-			convey.So(msg.Action, convey.ShouldEqual, "kick")
-			convey.So(msg.Target, convey.ShouldEqual, "user_abc")
-			convey.So(msg.FromNode, convey.ShouldEqual, "ws://self-test:9999")
-		case <-time.After(3 * time.Second):
-			t.Fatal("subscribe timeout, 没收到消息")
-		}
-
-		db.RDB.Close() // 关掉让 SubscribeBroadcast 退出
-		wg.Wait()
+	received := make(chan BroadcastMsg, 1)
+	go SubscribeBroadcast(func(msg BroadcastMsg) {
+		received <- msg
 	})
+
+	// 等订阅和 Redis 握手确认（Pub/Sub SUBSCRIBE 需要时间）
+	time.Sleep(500 * time.Millisecond)
+
+	// 直接 Publish 到 Redis，精确控制 FromNode
+	// FromNode != myNodeAddr → SubscribeBroadcast 不跳过 → handler 被调
+	payload, _ := json.Marshal(BroadcastMsg{
+		Action:   "kick",
+		Target:   "user_abc",
+		FromNode: "ws://other-node:8888",
+	})
+	if err := db.RDB.Publish(redisCtx(), ChannelBroadcast, payload).Err(); err != nil {
+		t.Fatalf("Publish failed: %v", err)
+	}
+
+	select {
+	case msg := <-received:
+		if msg.Action != "kick" || msg.Target != "user_abc" || msg.FromNode != "ws://other-node:8888" {
+			t.Fatalf("unexpected message: %+v", msg)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout: 没收到其他节点发的广播")
+	}
+	// 测试到此结束，SubscribeBroadcast goroutine 随进程退出自动清理
 }
 
 // ────────────────────────────────────────
