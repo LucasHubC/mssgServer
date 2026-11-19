@@ -10,6 +10,7 @@ import (
 	"mssgServer/infra/metrics"
 	rediscache "mssgServer/infra/redis"
 	"mssgServer/infra/rpc"
+	"mssgServer/infra/util"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -111,8 +112,16 @@ func main() {
 		log.Info("[Broker] shutdown complete, active proxies=", gateway.ActiveProxyConns())
 	}()
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	// 自定义 TCP Listener：增大 backlog，抗并发连接风暴
+	// util.ListenTCP 直接调 syscall.Listen(fd, 4096)，跨所有 Go 版本生效，附带 SO_REUSEADDR
+	ln, err := util.ListenTCP(addr, 4096)
+	if err != nil {
 		log.Fatal("[Broker] listen failed", "err", err)
+	}
+	log.Info("[Broker] TCP backlog=4096")
+
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		log.Fatal("[Broker] serve failed", "err", err)
 	}
 	log.Info("[Broker] bye~")
 }
