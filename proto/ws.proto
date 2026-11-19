@@ -33,6 +33,11 @@ message WSReq {
     RoomKick   room_kick   = 33;
     RoomDelete room_delete = 34;
     RoomSend   room_send   = 35;
+    // inventory.*
+    InventoryAdd     inventory_add     = 50;
+    InventoryConsume inventory_consume = 51;
+    InventoryDrop    inventory_drop    = 52;
+    InventoryGet     inventory_get     = 53;
   }
 
   // 兜底：老版本 msg_json 字符串（渐进式，handler 还没全改完时用）
@@ -63,6 +68,11 @@ message WSResp {
     // system.*
     SystemBroadcast system_broadcast = 40;
     SystemPush      system_push      = 41;
+    // inventory.*
+    InventoryAddResp     inventory_add_resp     = 50;
+    InventoryConsumeResp inventory_consume_resp = 51;
+    InventoryDropResp    inventory_drop_resp    = 52;
+    InventoryGetResp     inventory_get_resp     = 53;
   }
 
   // 兜底
@@ -232,6 +242,55 @@ message SystemBroadcast {
 message SystemPush {
   string content = 1;
   int64 timestamp = 2;
+}
+
+// ═══════════════════════════════════════════
+//  Inventory 业务消息
+// ═══════════════════════════════════════════
+
+message InventoryAdd {
+  string item_id = 1;
+  int64 count = 2;
+}
+
+message InventoryConsume {
+  string item_id = 1;
+  int64 count = 2;
+}
+
+message InventoryDrop {
+  string item_id = 1;
+  int64 count = 2;
+}
+
+message InventoryGet {
+  // empty
+}
+
+message InventoryAddResp {
+  string item_id = 1;
+  int64 new_count = 2;
+}
+
+message InventoryConsumeResp {
+  string item_id = 1;
+  int64 new_count = 2;
+}
+
+message InventoryDropResp {
+  string item_id = 1;
+  int64 new_count = 2;
+}
+
+message InventoryGetResp {
+  repeated ItemEntry items = 1;
+  int32 total = 2;
+}
+
+message ItemEntry {
+  string item_id = 1;
+  int64 count = 2;
+  string name = 3;
 }
 
 // ═══════════════════════════════════════════

@@ -45,6 +45,10 @@ type WSReq struct {
 	//	*WSReq_RoomKick
 	//	*WSReq_RoomDelete
 	//	*WSReq_RoomSend
+	//	*WSReq_InventoryAdd
+	//	*WSReq_InventoryConsume
+	//	*WSReq_InventoryDrop
+	//	*WSReq_InventoryGet
 	Msg isWSReq_Msg `protobuf_oneof:"msg"`
 	// 兜底：老版本 msg_json 字符串（渐进式，handler 还没全改完时用）
 	MsgJson       string `protobuf:"bytes,100,opt,name=msg_json,json=msgJson,proto3" json:"msg_json,omitempty"`
@@ -232,6 +236,42 @@ func (x *WSReq) GetRoomSend() *RoomSend {
 	return nil
 }
 
+func (x *WSReq) GetInventoryAdd() *InventoryAdd {
+	if x != nil {
+		if x, ok := x.Msg.(*WSReq_InventoryAdd); ok {
+			return x.InventoryAdd
+		}
+	}
+	return nil
+}
+
+func (x *WSReq) GetInventoryConsume() *InventoryConsume {
+	if x != nil {
+		if x, ok := x.Msg.(*WSReq_InventoryConsume); ok {
+			return x.InventoryConsume
+		}
+	}
+	return nil
+}
+
+func (x *WSReq) GetInventoryDrop() *InventoryDrop {
+	if x != nil {
+		if x, ok := x.Msg.(*WSReq_InventoryDrop); ok {
+			return x.InventoryDrop
+		}
+	}
+	return nil
+}
+
+func (x *WSReq) GetInventoryGet() *InventoryGet {
+	if x != nil {
+		if x, ok := x.Msg.(*WSReq_InventoryGet); ok {
+			return x.InventoryGet
+		}
+	}
+	return nil
+}
+
 func (x *WSReq) GetMsgJson() string {
 	if x != nil {
 		return x.MsgJson
@@ -294,6 +334,23 @@ type WSReq_RoomSend struct {
 	RoomSend *RoomSend `protobuf:"bytes,35,opt,name=room_send,json=roomSend,proto3,oneof"`
 }
 
+type WSReq_InventoryAdd struct {
+	// inventory.*
+	InventoryAdd *InventoryAdd `protobuf:"bytes,50,opt,name=inventory_add,json=inventoryAdd,proto3,oneof"`
+}
+
+type WSReq_InventoryConsume struct {
+	InventoryConsume *InventoryConsume `protobuf:"bytes,51,opt,name=inventory_consume,json=inventoryConsume,proto3,oneof"`
+}
+
+type WSReq_InventoryDrop struct {
+	InventoryDrop *InventoryDrop `protobuf:"bytes,52,opt,name=inventory_drop,json=inventoryDrop,proto3,oneof"`
+}
+
+type WSReq_InventoryGet struct {
+	InventoryGet *InventoryGet `protobuf:"bytes,53,opt,name=inventory_get,json=inventoryGet,proto3,oneof"`
+}
+
 func (*WSReq_AccountLogin) isWSReq_Msg() {}
 
 func (*WSReq_AccountRegister) isWSReq_Msg() {}
@@ -318,6 +375,14 @@ func (*WSReq_RoomDelete) isWSReq_Msg() {}
 
 func (*WSReq_RoomSend) isWSReq_Msg() {}
 
+func (*WSReq_InventoryAdd) isWSReq_Msg() {}
+
+func (*WSReq_InventoryConsume) isWSReq_Msg() {}
+
+func (*WSReq_InventoryDrop) isWSReq_Msg() {}
+
+func (*WSReq_InventoryGet) isWSReq_Msg() {}
+
 // WS 响应
 type WSResp struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -339,6 +404,10 @@ type WSResp struct {
 	//	*WSResp_RoomNotice
 	//	*WSResp_SystemBroadcast
 	//	*WSResp_SystemPush
+	//	*WSResp_InventoryAddResp
+	//	*WSResp_InventoryConsumeResp
+	//	*WSResp_InventoryDropResp
+	//	*WSResp_InventoryGetResp
 	Msg isWSResp_Msg `protobuf_oneof:"msg"`
 	// 兜底
 	MsgJson       string `protobuf:"bytes,100,opt,name=msg_json,json=msgJson,proto3" json:"msg_json,omitempty"`
@@ -521,6 +590,42 @@ func (x *WSResp) GetSystemPush() *SystemPush {
 	return nil
 }
 
+func (x *WSResp) GetInventoryAddResp() *InventoryAddResp {
+	if x != nil {
+		if x, ok := x.Msg.(*WSResp_InventoryAddResp); ok {
+			return x.InventoryAddResp
+		}
+	}
+	return nil
+}
+
+func (x *WSResp) GetInventoryConsumeResp() *InventoryConsumeResp {
+	if x != nil {
+		if x, ok := x.Msg.(*WSResp_InventoryConsumeResp); ok {
+			return x.InventoryConsumeResp
+		}
+	}
+	return nil
+}
+
+func (x *WSResp) GetInventoryDropResp() *InventoryDropResp {
+	if x != nil {
+		if x, ok := x.Msg.(*WSResp_InventoryDropResp); ok {
+			return x.InventoryDropResp
+		}
+	}
+	return nil
+}
+
+func (x *WSResp) GetInventoryGetResp() *InventoryGetResp {
+	if x != nil {
+		if x, ok := x.Msg.(*WSResp_InventoryGetResp); ok {
+			return x.InventoryGetResp
+		}
+	}
+	return nil
+}
+
 func (x *WSResp) GetMsgJson() string {
 	if x != nil {
 		return x.MsgJson
@@ -588,6 +693,23 @@ type WSResp_SystemPush struct {
 	SystemPush *SystemPush `protobuf:"bytes,41,opt,name=system_push,json=systemPush,proto3,oneof"`
 }
 
+type WSResp_InventoryAddResp struct {
+	// inventory.*
+	InventoryAddResp *InventoryAddResp `protobuf:"bytes,50,opt,name=inventory_add_resp,json=inventoryAddResp,proto3,oneof"`
+}
+
+type WSResp_InventoryConsumeResp struct {
+	InventoryConsumeResp *InventoryConsumeResp `protobuf:"bytes,51,opt,name=inventory_consume_resp,json=inventoryConsumeResp,proto3,oneof"`
+}
+
+type WSResp_InventoryDropResp struct {
+	InventoryDropResp *InventoryDropResp `protobuf:"bytes,52,opt,name=inventory_drop_resp,json=inventoryDropResp,proto3,oneof"`
+}
+
+type WSResp_InventoryGetResp struct {
+	InventoryGetResp *InventoryGetResp `protobuf:"bytes,53,opt,name=inventory_get_resp,json=inventoryGetResp,proto3,oneof"`
+}
+
 func (*WSResp_AccountLoginResp) isWSResp_Msg() {}
 
 func (*WSResp_AccountRegisterResp) isWSResp_Msg() {}
@@ -613,6 +735,14 @@ func (*WSResp_RoomNotice) isWSResp_Msg() {}
 func (*WSResp_SystemBroadcast) isWSResp_Msg() {}
 
 func (*WSResp_SystemPush) isWSResp_Msg() {}
+
+func (*WSResp_InventoryAddResp) isWSResp_Msg() {}
+
+func (*WSResp_InventoryConsumeResp) isWSResp_Msg() {}
+
+func (*WSResp_InventoryDropResp) isWSResp_Msg() {}
+
+func (*WSResp_InventoryGetResp) isWSResp_Msg() {}
 
 type AccountLogin struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2074,6 +2204,466 @@ func (x *SystemPush) GetTimestamp() int64 {
 	return 0
 }
 
+type InventoryAdd struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventoryAdd) Reset() {
+	*x = InventoryAdd{}
+	mi := &file_proto_ws_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventoryAdd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventoryAdd) ProtoMessage() {}
+
+func (x *InventoryAdd) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventoryAdd.ProtoReflect.Descriptor instead.
+func (*InventoryAdd) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *InventoryAdd) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *InventoryAdd) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+type InventoryConsume struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventoryConsume) Reset() {
+	*x = InventoryConsume{}
+	mi := &file_proto_ws_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventoryConsume) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventoryConsume) ProtoMessage() {}
+
+func (x *InventoryConsume) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventoryConsume.ProtoReflect.Descriptor instead.
+func (*InventoryConsume) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *InventoryConsume) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *InventoryConsume) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+type InventoryDrop struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventoryDrop) Reset() {
+	*x = InventoryDrop{}
+	mi := &file_proto_ws_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventoryDrop) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventoryDrop) ProtoMessage() {}
+
+func (x *InventoryDrop) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventoryDrop.ProtoReflect.Descriptor instead.
+func (*InventoryDrop) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *InventoryDrop) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *InventoryDrop) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+type InventoryGet struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventoryGet) Reset() {
+	*x = InventoryGet{}
+	mi := &file_proto_ws_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventoryGet) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventoryGet) ProtoMessage() {}
+
+func (x *InventoryGet) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventoryGet.ProtoReflect.Descriptor instead.
+func (*InventoryGet) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{30}
+}
+
+type InventoryAddResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	NewCount      int64                  `protobuf:"varint,2,opt,name=new_count,json=newCount,proto3" json:"new_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventoryAddResp) Reset() {
+	*x = InventoryAddResp{}
+	mi := &file_proto_ws_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventoryAddResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventoryAddResp) ProtoMessage() {}
+
+func (x *InventoryAddResp) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventoryAddResp.ProtoReflect.Descriptor instead.
+func (*InventoryAddResp) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *InventoryAddResp) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *InventoryAddResp) GetNewCount() int64 {
+	if x != nil {
+		return x.NewCount
+	}
+	return 0
+}
+
+type InventoryConsumeResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	NewCount      int64                  `protobuf:"varint,2,opt,name=new_count,json=newCount,proto3" json:"new_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventoryConsumeResp) Reset() {
+	*x = InventoryConsumeResp{}
+	mi := &file_proto_ws_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventoryConsumeResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventoryConsumeResp) ProtoMessage() {}
+
+func (x *InventoryConsumeResp) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventoryConsumeResp.ProtoReflect.Descriptor instead.
+func (*InventoryConsumeResp) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *InventoryConsumeResp) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *InventoryConsumeResp) GetNewCount() int64 {
+	if x != nil {
+		return x.NewCount
+	}
+	return 0
+}
+
+type InventoryDropResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	NewCount      int64                  `protobuf:"varint,2,opt,name=new_count,json=newCount,proto3" json:"new_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventoryDropResp) Reset() {
+	*x = InventoryDropResp{}
+	mi := &file_proto_ws_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventoryDropResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventoryDropResp) ProtoMessage() {}
+
+func (x *InventoryDropResp) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventoryDropResp.ProtoReflect.Descriptor instead.
+func (*InventoryDropResp) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *InventoryDropResp) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *InventoryDropResp) GetNewCount() int64 {
+	if x != nil {
+		return x.NewCount
+	}
+	return 0
+}
+
+type InventoryGetResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*ItemEntry           `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	Total         int32                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InventoryGetResp) Reset() {
+	*x = InventoryGetResp{}
+	mi := &file_proto_ws_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InventoryGetResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InventoryGetResp) ProtoMessage() {}
+
+func (x *InventoryGetResp) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InventoryGetResp.ProtoReflect.Descriptor instead.
+func (*InventoryGetResp) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *InventoryGetResp) GetItems() []*ItemEntry {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *InventoryGetResp) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type ItemEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ItemEntry) Reset() {
+	*x = ItemEntry{}
+	mi := &file_proto_ws_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ItemEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ItemEntry) ProtoMessage() {}
+
+func (x *ItemEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_ws_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ItemEntry.ProtoReflect.Descriptor instead.
+func (*ItemEntry) Descriptor() ([]byte, []int) {
+	return file_proto_ws_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ItemEntry) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *ItemEntry) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *ItemEntry) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 // 服务端批量推送给客户端
 type BatchResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2084,7 +2674,7 @@ type BatchResp struct {
 
 func (x *BatchResp) Reset() {
 	*x = BatchResp{}
-	mi := &file_proto_ws_proto_msgTypes[27]
+	mi := &file_proto_ws_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2096,7 +2686,7 @@ func (x *BatchResp) String() string {
 func (*BatchResp) ProtoMessage() {}
 
 func (x *BatchResp) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ws_proto_msgTypes[27]
+	mi := &file_proto_ws_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2109,7 +2699,7 @@ func (x *BatchResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchResp.ProtoReflect.Descriptor instead.
 func (*BatchResp) Descriptor() ([]byte, []int) {
-	return file_proto_ws_proto_rawDescGZIP(), []int{27}
+	return file_proto_ws_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *BatchResp) GetMsgs() []*WSResp {
@@ -2129,7 +2719,7 @@ type BatchReq struct {
 
 func (x *BatchReq) Reset() {
 	*x = BatchReq{}
-	mi := &file_proto_ws_proto_msgTypes[28]
+	mi := &file_proto_ws_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2141,7 +2731,7 @@ func (x *BatchReq) String() string {
 func (*BatchReq) ProtoMessage() {}
 
 func (x *BatchReq) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_ws_proto_msgTypes[28]
+	mi := &file_proto_ws_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2154,7 +2744,7 @@ func (x *BatchReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchReq.ProtoReflect.Descriptor instead.
 func (*BatchReq) Descriptor() ([]byte, []int) {
-	return file_proto_ws_proto_rawDescGZIP(), []int{28}
+	return file_proto_ws_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *BatchReq) GetReqs() []*WSReq {
@@ -2168,7 +2758,7 @@ var File_proto_ws_proto protoreflect.FileDescriptor
 
 const file_proto_ws_proto_rawDesc = "" +
 	"\n" +
-	"\x0eproto/ws.proto\x12\x02ws\"\xb7\x06\n" +
+	"\x0eproto/ws.proto\x12\x02ws\"\xaa\b\n" +
 	"\x05WSReq\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -2190,9 +2780,13 @@ const file_proto_ws_proto_rawDesc = "" +
 	"\troom_kick\x18! \x01(\v2\f.ws.RoomKickH\x00R\broomKick\x121\n" +
 	"\vroom_delete\x18\" \x01(\v2\x0e.ws.RoomDeleteH\x00R\n" +
 	"roomDelete\x12+\n" +
-	"\troom_send\x18# \x01(\v2\f.ws.RoomSendH\x00R\broomSend\x12\x19\n" +
+	"\troom_send\x18# \x01(\v2\f.ws.RoomSendH\x00R\broomSend\x127\n" +
+	"\rinventory_add\x182 \x01(\v2\x10.ws.InventoryAddH\x00R\finventoryAdd\x12C\n" +
+	"\x11inventory_consume\x183 \x01(\v2\x14.ws.InventoryConsumeH\x00R\x10inventoryConsume\x12:\n" +
+	"\x0einventory_drop\x184 \x01(\v2\x11.ws.InventoryDropH\x00R\rinventoryDrop\x127\n" +
+	"\rinventory_get\x185 \x01(\v2\x10.ws.InventoryGetH\x00R\finventoryGet\x12\x19\n" +
 	"\bmsg_json\x18d \x01(\tR\amsgJsonB\x05\n" +
-	"\x03msg\"\x89\a\n" +
+	"\x03msg\"\xb0\t\n" +
 	"\x06WSResp\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -2212,7 +2806,11 @@ const file_proto_ws_proto_rawDesc = "" +
 	"roomNotice\x12@\n" +
 	"\x10system_broadcast\x18( \x01(\v2\x13.ws.SystemBroadcastH\x00R\x0fsystemBroadcast\x121\n" +
 	"\vsystem_push\x18) \x01(\v2\x0e.ws.SystemPushH\x00R\n" +
-	"systemPush\x12\x19\n" +
+	"systemPush\x12D\n" +
+	"\x12inventory_add_resp\x182 \x01(\v2\x14.ws.InventoryAddRespH\x00R\x10inventoryAddResp\x12P\n" +
+	"\x16inventory_consume_resp\x183 \x01(\v2\x18.ws.InventoryConsumeRespH\x00R\x14inventoryConsumeResp\x12G\n" +
+	"\x13inventory_drop_resp\x184 \x01(\v2\x15.ws.InventoryDropRespH\x00R\x11inventoryDropResp\x12D\n" +
+	"\x12inventory_get_resp\x185 \x01(\v2\x14.ws.InventoryGetRespH\x00R\x10inventoryGetResp\x12\x19\n" +
 	"\bmsg_json\x18d \x01(\tR\amsgJsonB\x05\n" +
 	"\x03msg\"F\n" +
 	"\fAccountLogin\x12\x1a\n" +
@@ -2318,7 +2916,33 @@ const file_proto_ws_proto_rawDesc = "" +
 	"\n" +
 	"SystemPush\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x1c\n" +
-	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"+\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"=\n" +
+	"\fInventoryAdd\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\"A\n" +
+	"\x10InventoryConsume\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\">\n" +
+	"\rInventoryDrop\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\"\x0e\n" +
+	"\fInventoryGet\"H\n" +
+	"\x10InventoryAddResp\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x1b\n" +
+	"\tnew_count\x18\x02 \x01(\x03R\bnewCount\"L\n" +
+	"\x14InventoryConsumeResp\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x1b\n" +
+	"\tnew_count\x18\x02 \x01(\x03R\bnewCount\"I\n" +
+	"\x11InventoryDropResp\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x1b\n" +
+	"\tnew_count\x18\x02 \x01(\x03R\bnewCount\"M\n" +
+	"\x10InventoryGetResp\x12#\n" +
+	"\x05items\x18\x01 \x03(\v2\r.ws.ItemEntryR\x05items\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x05R\x05total\"N\n" +
+	"\tItemEntry\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"+\n" +
 	"\tBatchResp\x12\x1e\n" +
 	"\x04msgs\x18\x01 \x03(\v2\n" +
 	".ws.WSRespR\x04msgs\")\n" +
@@ -2337,38 +2961,47 @@ func file_proto_ws_proto_rawDescGZIP() []byte {
 	return file_proto_ws_proto_rawDescData
 }
 
-var file_proto_ws_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_proto_ws_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_proto_ws_proto_goTypes = []any{
-	(*WSReq)(nil),               // 0: ws.WSReq
-	(*WSResp)(nil),              // 1: ws.WSResp
-	(*AccountLogin)(nil),        // 2: ws.AccountLogin
-	(*AccountLoginResp)(nil),    // 3: ws.AccountLoginResp
-	(*AccountRegister)(nil),     // 4: ws.AccountRegister
-	(*AccountRegisterResp)(nil), // 5: ws.AccountRegisterResp
-	(*ChatWorldSend)(nil),       // 6: ws.ChatWorldSend
-	(*ChatPrivateSend)(nil),     // 7: ws.ChatPrivateSend
-	(*ChatGroupSend)(nil),       // 8: ws.ChatGroupSend
-	(*GroupMember)(nil),         // 9: ws.GroupMember
-	(*GroupMemberResp)(nil),     // 10: ws.GroupMemberResp
-	(*ChatOnlineResp)(nil),      // 11: ws.ChatOnlineResp
-	(*ChatWorldNew)(nil),        // 12: ws.ChatWorldNew
-	(*ChatPrivateNew)(nil),      // 13: ws.ChatPrivateNew
-	(*ChatGroupNew)(nil),        // 14: ws.ChatGroupNew
-	(*RoomCreate)(nil),          // 15: ws.RoomCreate
-	(*RoomCreateResp)(nil),      // 16: ws.RoomCreateResp
-	(*RoomJoin)(nil),            // 17: ws.RoomJoin
-	(*RoomJoinResp)(nil),        // 18: ws.RoomJoinResp
-	(*RoomLeave)(nil),           // 19: ws.RoomLeave
-	(*RoomKick)(nil),            // 20: ws.RoomKick
-	(*RoomDelete)(nil),          // 21: ws.RoomDelete
-	(*RoomSend)(nil),            // 22: ws.RoomSend
-	(*RoomChatNew)(nil),         // 23: ws.RoomChatNew
-	(*RoomNotice)(nil),          // 24: ws.RoomNotice
-	(*SystemBroadcast)(nil),     // 25: ws.SystemBroadcast
-	(*SystemPush)(nil),          // 26: ws.SystemPush
-	(*BatchResp)(nil),           // 27: ws.BatchResp
-	(*BatchReq)(nil),            // 28: ws.BatchReq
-	nil,                         // 29: ws.AccountLoginResp.ItemsEntry
+	(*WSReq)(nil),                // 0: ws.WSReq
+	(*WSResp)(nil),               // 1: ws.WSResp
+	(*AccountLogin)(nil),         // 2: ws.AccountLogin
+	(*AccountLoginResp)(nil),     // 3: ws.AccountLoginResp
+	(*AccountRegister)(nil),      // 4: ws.AccountRegister
+	(*AccountRegisterResp)(nil),  // 5: ws.AccountRegisterResp
+	(*ChatWorldSend)(nil),        // 6: ws.ChatWorldSend
+	(*ChatPrivateSend)(nil),      // 7: ws.ChatPrivateSend
+	(*ChatGroupSend)(nil),        // 8: ws.ChatGroupSend
+	(*GroupMember)(nil),          // 9: ws.GroupMember
+	(*GroupMemberResp)(nil),      // 10: ws.GroupMemberResp
+	(*ChatOnlineResp)(nil),       // 11: ws.ChatOnlineResp
+	(*ChatWorldNew)(nil),         // 12: ws.ChatWorldNew
+	(*ChatPrivateNew)(nil),       // 13: ws.ChatPrivateNew
+	(*ChatGroupNew)(nil),         // 14: ws.ChatGroupNew
+	(*RoomCreate)(nil),           // 15: ws.RoomCreate
+	(*RoomCreateResp)(nil),       // 16: ws.RoomCreateResp
+	(*RoomJoin)(nil),             // 17: ws.RoomJoin
+	(*RoomJoinResp)(nil),         // 18: ws.RoomJoinResp
+	(*RoomLeave)(nil),            // 19: ws.RoomLeave
+	(*RoomKick)(nil),             // 20: ws.RoomKick
+	(*RoomDelete)(nil),           // 21: ws.RoomDelete
+	(*RoomSend)(nil),             // 22: ws.RoomSend
+	(*RoomChatNew)(nil),          // 23: ws.RoomChatNew
+	(*RoomNotice)(nil),           // 24: ws.RoomNotice
+	(*SystemBroadcast)(nil),      // 25: ws.SystemBroadcast
+	(*SystemPush)(nil),           // 26: ws.SystemPush
+	(*InventoryAdd)(nil),         // 27: ws.InventoryAdd
+	(*InventoryConsume)(nil),     // 28: ws.InventoryConsume
+	(*InventoryDrop)(nil),        // 29: ws.InventoryDrop
+	(*InventoryGet)(nil),         // 30: ws.InventoryGet
+	(*InventoryAddResp)(nil),     // 31: ws.InventoryAddResp
+	(*InventoryConsumeResp)(nil), // 32: ws.InventoryConsumeResp
+	(*InventoryDropResp)(nil),    // 33: ws.InventoryDropResp
+	(*InventoryGetResp)(nil),     // 34: ws.InventoryGetResp
+	(*ItemEntry)(nil),            // 35: ws.ItemEntry
+	(*BatchResp)(nil),            // 36: ws.BatchResp
+	(*BatchReq)(nil),             // 37: ws.BatchReq
+	nil,                          // 38: ws.AccountLoginResp.ItemsEntry
 }
 var file_proto_ws_proto_depIdxs = []int32{
 	2,  // 0: ws.WSReq.account_login:type_name -> ws.AccountLogin
@@ -2383,27 +3016,36 @@ var file_proto_ws_proto_depIdxs = []int32{
 	20, // 9: ws.WSReq.room_kick:type_name -> ws.RoomKick
 	21, // 10: ws.WSReq.room_delete:type_name -> ws.RoomDelete
 	22, // 11: ws.WSReq.room_send:type_name -> ws.RoomSend
-	3,  // 12: ws.WSResp.account_login_resp:type_name -> ws.AccountLoginResp
-	5,  // 13: ws.WSResp.account_register_resp:type_name -> ws.AccountRegisterResp
-	12, // 14: ws.WSResp.chat_world_new:type_name -> ws.ChatWorldNew
-	13, // 15: ws.WSResp.chat_private_new:type_name -> ws.ChatPrivateNew
-	14, // 16: ws.WSResp.chat_group_new:type_name -> ws.ChatGroupNew
-	10, // 17: ws.WSResp.group_member_resp:type_name -> ws.GroupMemberResp
-	11, // 18: ws.WSResp.chat_online_resp:type_name -> ws.ChatOnlineResp
-	16, // 19: ws.WSResp.room_create_resp:type_name -> ws.RoomCreateResp
-	18, // 20: ws.WSResp.room_join_resp:type_name -> ws.RoomJoinResp
-	23, // 21: ws.WSResp.room_chat_new:type_name -> ws.RoomChatNew
-	24, // 22: ws.WSResp.room_notice:type_name -> ws.RoomNotice
-	25, // 23: ws.WSResp.system_broadcast:type_name -> ws.SystemBroadcast
-	26, // 24: ws.WSResp.system_push:type_name -> ws.SystemPush
-	29, // 25: ws.AccountLoginResp.items:type_name -> ws.AccountLoginResp.ItemsEntry
-	1,  // 26: ws.BatchResp.msgs:type_name -> ws.WSResp
-	0,  // 27: ws.BatchReq.reqs:type_name -> ws.WSReq
-	28, // [28:28] is the sub-list for method output_type
-	28, // [28:28] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	27, // 12: ws.WSReq.inventory_add:type_name -> ws.InventoryAdd
+	28, // 13: ws.WSReq.inventory_consume:type_name -> ws.InventoryConsume
+	29, // 14: ws.WSReq.inventory_drop:type_name -> ws.InventoryDrop
+	30, // 15: ws.WSReq.inventory_get:type_name -> ws.InventoryGet
+	3,  // 16: ws.WSResp.account_login_resp:type_name -> ws.AccountLoginResp
+	5,  // 17: ws.WSResp.account_register_resp:type_name -> ws.AccountRegisterResp
+	12, // 18: ws.WSResp.chat_world_new:type_name -> ws.ChatWorldNew
+	13, // 19: ws.WSResp.chat_private_new:type_name -> ws.ChatPrivateNew
+	14, // 20: ws.WSResp.chat_group_new:type_name -> ws.ChatGroupNew
+	10, // 21: ws.WSResp.group_member_resp:type_name -> ws.GroupMemberResp
+	11, // 22: ws.WSResp.chat_online_resp:type_name -> ws.ChatOnlineResp
+	16, // 23: ws.WSResp.room_create_resp:type_name -> ws.RoomCreateResp
+	18, // 24: ws.WSResp.room_join_resp:type_name -> ws.RoomJoinResp
+	23, // 25: ws.WSResp.room_chat_new:type_name -> ws.RoomChatNew
+	24, // 26: ws.WSResp.room_notice:type_name -> ws.RoomNotice
+	25, // 27: ws.WSResp.system_broadcast:type_name -> ws.SystemBroadcast
+	26, // 28: ws.WSResp.system_push:type_name -> ws.SystemPush
+	31, // 29: ws.WSResp.inventory_add_resp:type_name -> ws.InventoryAddResp
+	32, // 30: ws.WSResp.inventory_consume_resp:type_name -> ws.InventoryConsumeResp
+	33, // 31: ws.WSResp.inventory_drop_resp:type_name -> ws.InventoryDropResp
+	34, // 32: ws.WSResp.inventory_get_resp:type_name -> ws.InventoryGetResp
+	38, // 33: ws.AccountLoginResp.items:type_name -> ws.AccountLoginResp.ItemsEntry
+	35, // 34: ws.InventoryGetResp.items:type_name -> ws.ItemEntry
+	1,  // 35: ws.BatchResp.msgs:type_name -> ws.WSResp
+	0,  // 36: ws.BatchReq.reqs:type_name -> ws.WSReq
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_proto_ws_proto_init() }
@@ -2424,6 +3066,10 @@ func file_proto_ws_proto_init() {
 		(*WSReq_RoomKick)(nil),
 		(*WSReq_RoomDelete)(nil),
 		(*WSReq_RoomSend)(nil),
+		(*WSReq_InventoryAdd)(nil),
+		(*WSReq_InventoryConsume)(nil),
+		(*WSReq_InventoryDrop)(nil),
+		(*WSReq_InventoryGet)(nil),
 	}
 	file_proto_ws_proto_msgTypes[1].OneofWrappers = []any{
 		(*WSResp_AccountLoginResp)(nil),
@@ -2439,6 +3085,10 @@ func file_proto_ws_proto_init() {
 		(*WSResp_RoomNotice)(nil),
 		(*WSResp_SystemBroadcast)(nil),
 		(*WSResp_SystemPush)(nil),
+		(*WSResp_InventoryAddResp)(nil),
+		(*WSResp_InventoryConsumeResp)(nil),
+		(*WSResp_InventoryDropResp)(nil),
+		(*WSResp_InventoryGetResp)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2446,7 +3096,7 @@ func file_proto_ws_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_ws_proto_rawDesc), len(file_proto_ws_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

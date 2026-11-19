@@ -243,6 +243,30 @@ func setReqOneof(p *proto.WSReq, name string, msg interface{}) error {
 			return typeErr(name, msg)
 		}
 		p.Msg = &proto.WSReq_RoomSend{RoomSend: m}
+	case "inventory.add":
+		m, ok := msg.(*proto.InventoryAdd)
+		if !ok {
+			return typeErr(name, msg)
+		}
+		p.Msg = &proto.WSReq_InventoryAdd{InventoryAdd: m}
+	case "inventory.consume":
+		m, ok := msg.(*proto.InventoryConsume)
+		if !ok {
+			return typeErr(name, msg)
+		}
+		p.Msg = &proto.WSReq_InventoryConsume{InventoryConsume: m}
+	case "inventory.drop":
+		m, ok := msg.(*proto.InventoryDrop)
+		if !ok {
+			return typeErr(name, msg)
+		}
+		p.Msg = &proto.WSReq_InventoryDrop{InventoryDrop: m}
+	case "inventory.get":
+		m, ok := msg.(*proto.InventoryGet)
+		if !ok {
+			return typeErr(name, msg)
+		}
+		p.Msg = &proto.WSReq_InventoryGet{InventoryGet: m}
 	default:
 		return errTypeMismatch // 兜底走 json
 	}
@@ -278,6 +302,14 @@ func unwrapReqOneof(m interface{}) interface{} {
 		return v.RoomDelete
 	case *proto.WSReq_RoomSend:
 		return v.RoomSend
+	case *proto.WSReq_InventoryAdd:
+		return v.InventoryAdd
+	case *proto.WSReq_InventoryConsume:
+		return v.InventoryConsume
+	case *proto.WSReq_InventoryDrop:
+		return v.InventoryDrop
+	case *proto.WSReq_InventoryGet:
+		return v.InventoryGet
 	default:
 		return m
 	}
@@ -366,6 +398,30 @@ func setRespOneof(p *proto.WSResp, name string, msg interface{}) error {
 			return typeErr(name, msg)
 		}
 		p.Msg = &proto.WSResp_SystemPush{SystemPush: m}
+	case "inventory.add":
+		m, ok := msg.(*proto.InventoryAddResp)
+		if !ok {
+			return typeErr(name, msg)
+		}
+		p.Msg = &proto.WSResp_InventoryAddResp{InventoryAddResp: m}
+	case "inventory.consume":
+		m, ok := msg.(*proto.InventoryConsumeResp)
+		if !ok {
+			return typeErr(name, msg)
+		}
+		p.Msg = &proto.WSResp_InventoryConsumeResp{InventoryConsumeResp: m}
+	case "inventory.drop":
+		m, ok := msg.(*proto.InventoryDropResp)
+		if !ok {
+			return typeErr(name, msg)
+		}
+		p.Msg = &proto.WSResp_InventoryDropResp{InventoryDropResp: m}
+	case "inventory.get":
+		m, ok := msg.(*proto.InventoryGetResp)
+		if !ok {
+			return typeErr(name, msg)
+		}
+		p.Msg = &proto.WSResp_InventoryGetResp{InventoryGetResp: m}
 	default:
 		return errTypeMismatch
 	}
@@ -401,6 +457,14 @@ func unwrapRespOneof(m interface{}) interface{} {
 		return v.SystemBroadcast
 	case *proto.WSResp_SystemPush:
 		return v.SystemPush
+	case *proto.WSResp_InventoryAddResp:
+		return v.InventoryAddResp
+	case *proto.WSResp_InventoryConsumeResp:
+		return v.InventoryConsumeResp
+	case *proto.WSResp_InventoryDropResp:
+		return v.InventoryDropResp
+	case *proto.WSResp_InventoryGetResp:
+		return v.InventoryGetResp
 	default:
 		return m
 	}

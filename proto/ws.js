@@ -1,22 +1,20 @@
 /*eslint-disable block-scoped-var, id-length, no-control-regex, no-magic-numbers, no-prototype-builtins, no-redeclare, no-shadow, no-var, sort-vars*/
-"use strict";
-
-var $protobuf = require("protobufjs/minimal");
+import * as $protobuf from "protobufjs/minimal";
 
 // Common aliases
-var $Reader = $protobuf.Reader, $Writer = $protobuf.Writer, $util = $protobuf.util;
+const $Reader = $protobuf.Reader, $Writer = $protobuf.Writer, $util = $protobuf.util;
 
 // Exported root namespace
-var $root = $protobuf.roots["default"] || ($protobuf.roots["default"] = {});
+const $root = $protobuf.roots["default"] || ($protobuf.roots["default"] = {});
 
-$root.ws = (function() {
+export const ws = $root.ws = (() => {
 
     /**
      * Namespace ws.
      * @exports ws
      * @namespace
      */
-    var ws = {};
+    const ws = {};
 
     ws.WSReq = (function() {
 
@@ -41,6 +39,10 @@ $root.ws = (function() {
          * @property {ws.IRoomKick|null} [roomKick] WSReq roomKick
          * @property {ws.IRoomDelete|null} [roomDelete] WSReq roomDelete
          * @property {ws.IRoomSend|null} [roomSend] WSReq roomSend
+         * @property {ws.IInventoryAdd|null} [inventoryAdd] WSReq inventoryAdd
+         * @property {ws.IInventoryConsume|null} [inventoryConsume] WSReq inventoryConsume
+         * @property {ws.IInventoryDrop|null} [inventoryDrop] WSReq inventoryDrop
+         * @property {ws.IInventoryGet|null} [inventoryGet] WSReq inventoryGet
          * @property {string|null} [msgJson] WSReq msgJson
          */
 
@@ -54,7 +56,7 @@ $root.ws = (function() {
          */
         function WSReq(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -196,6 +198,38 @@ $root.ws = (function() {
         WSReq.prototype.roomSend = null;
 
         /**
+         * WSReq inventoryAdd.
+         * @member {ws.IInventoryAdd|null|undefined} inventoryAdd
+         * @memberof ws.WSReq
+         * @instance
+         */
+        WSReq.prototype.inventoryAdd = null;
+
+        /**
+         * WSReq inventoryConsume.
+         * @member {ws.IInventoryConsume|null|undefined} inventoryConsume
+         * @memberof ws.WSReq
+         * @instance
+         */
+        WSReq.prototype.inventoryConsume = null;
+
+        /**
+         * WSReq inventoryDrop.
+         * @member {ws.IInventoryDrop|null|undefined} inventoryDrop
+         * @memberof ws.WSReq
+         * @instance
+         */
+        WSReq.prototype.inventoryDrop = null;
+
+        /**
+         * WSReq inventoryGet.
+         * @member {ws.IInventoryGet|null|undefined} inventoryGet
+         * @memberof ws.WSReq
+         * @instance
+         */
+        WSReq.prototype.inventoryGet = null;
+
+        /**
          * WSReq msgJson.
          * @member {string} msgJson
          * @memberof ws.WSReq
@@ -204,16 +238,16 @@ $root.ws = (function() {
         WSReq.prototype.msgJson = "";
 
         // OneOf field names bound to virtual getters and setters
-        var $oneOfFields;
+        let $oneOfFields;
 
         /**
          * WSReq msg.
-         * @member {"accountLogin"|"accountRegister"|"chatWorldSend"|"chatPrivateSend"|"chatGroupSend"|"groupMemberReq"|"roomCreate"|"roomJoin"|"roomLeave"|"roomKick"|"roomDelete"|"roomSend"|undefined} msg
+         * @member {"accountLogin"|"accountRegister"|"chatWorldSend"|"chatPrivateSend"|"chatGroupSend"|"groupMemberReq"|"roomCreate"|"roomJoin"|"roomLeave"|"roomKick"|"roomDelete"|"roomSend"|"inventoryAdd"|"inventoryConsume"|"inventoryDrop"|"inventoryGet"|undefined} msg
          * @memberof ws.WSReq
          * @instance
          */
         Object.defineProperty(WSReq.prototype, "msg", {
-            get: $util.oneOfGetter($oneOfFields = ["accountLogin", "accountRegister", "chatWorldSend", "chatPrivateSend", "chatGroupSend", "groupMemberReq", "roomCreate", "roomJoin", "roomLeave", "roomKick", "roomDelete", "roomSend"]),
+            get: $util.oneOfGetter($oneOfFields = ["accountLogin", "accountRegister", "chatWorldSend", "chatPrivateSend", "chatGroupSend", "groupMemberReq", "roomCreate", "roomJoin", "roomLeave", "roomKick", "roomDelete", "roomSend", "inventoryAdd", "inventoryConsume", "inventoryDrop", "inventoryGet"]),
             set: $util.oneOfSetter($oneOfFields)
         });
 
@@ -275,6 +309,14 @@ $root.ws = (function() {
                 $root.ws.RoomDelete.encode(message.roomDelete, writer.uint32(/* id 34, wireType 2 =*/274).fork()).ldelim();
             if (message.roomSend != null && Object.hasOwnProperty.call(message, "roomSend"))
                 $root.ws.RoomSend.encode(message.roomSend, writer.uint32(/* id 35, wireType 2 =*/282).fork()).ldelim();
+            if (message.inventoryAdd != null && Object.hasOwnProperty.call(message, "inventoryAdd"))
+                $root.ws.InventoryAdd.encode(message.inventoryAdd, writer.uint32(/* id 50, wireType 2 =*/402).fork()).ldelim();
+            if (message.inventoryConsume != null && Object.hasOwnProperty.call(message, "inventoryConsume"))
+                $root.ws.InventoryConsume.encode(message.inventoryConsume, writer.uint32(/* id 51, wireType 2 =*/410).fork()).ldelim();
+            if (message.inventoryDrop != null && Object.hasOwnProperty.call(message, "inventoryDrop"))
+                $root.ws.InventoryDrop.encode(message.inventoryDrop, writer.uint32(/* id 52, wireType 2 =*/418).fork()).ldelim();
+            if (message.inventoryGet != null && Object.hasOwnProperty.call(message, "inventoryGet"))
+                $root.ws.InventoryGet.encode(message.inventoryGet, writer.uint32(/* id 53, wireType 2 =*/426).fork()).ldelim();
             if (message.msgJson != null && Object.hasOwnProperty.call(message, "msgJson"))
                 writer.uint32(/* id 100, wireType 2 =*/802).string(message.msgJson);
             return writer;
@@ -307,9 +349,9 @@ $root.ws = (function() {
         WSReq.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.WSReq();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.WSReq();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.seq = reader.int64();
@@ -362,6 +404,18 @@ $root.ws = (function() {
                 case 35:
                     message.roomSend = $root.ws.RoomSend.decode(reader, reader.uint32());
                     break;
+                case 50:
+                    message.inventoryAdd = $root.ws.InventoryAdd.decode(reader, reader.uint32());
+                    break;
+                case 51:
+                    message.inventoryConsume = $root.ws.InventoryConsume.decode(reader, reader.uint32());
+                    break;
+                case 52:
+                    message.inventoryDrop = $root.ws.InventoryDrop.decode(reader, reader.uint32());
+                    break;
+                case 53:
+                    message.inventoryGet = $root.ws.InventoryGet.decode(reader, reader.uint32());
+                    break;
                 case 100:
                     message.msgJson = reader.string();
                     break;
@@ -400,7 +454,7 @@ $root.ws = (function() {
         WSReq.verify = function verify(message) {
             if (typeof message !== "object" || message === null)
                 return "object expected";
-            var properties = {};
+            let properties = {};
             if (message.seq != null && message.hasOwnProperty("seq"))
                 if (!$util.isInteger(message.seq) && !(message.seq && $util.isInteger(message.seq.low) && $util.isInteger(message.seq.high)))
                     return "seq: integer|Long expected";
@@ -419,7 +473,7 @@ $root.ws = (function() {
             if (message.accountLogin != null && message.hasOwnProperty("accountLogin")) {
                 properties.msg = 1;
                 {
-                    var error = $root.ws.AccountLogin.verify(message.accountLogin);
+                    let error = $root.ws.AccountLogin.verify(message.accountLogin);
                     if (error)
                         return "accountLogin." + error;
                 }
@@ -429,7 +483,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.AccountRegister.verify(message.accountRegister);
+                    let error = $root.ws.AccountRegister.verify(message.accountRegister);
                     if (error)
                         return "accountRegister." + error;
                 }
@@ -439,7 +493,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.ChatWorldSend.verify(message.chatWorldSend);
+                    let error = $root.ws.ChatWorldSend.verify(message.chatWorldSend);
                     if (error)
                         return "chatWorldSend." + error;
                 }
@@ -449,7 +503,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.ChatPrivateSend.verify(message.chatPrivateSend);
+                    let error = $root.ws.ChatPrivateSend.verify(message.chatPrivateSend);
                     if (error)
                         return "chatPrivateSend." + error;
                 }
@@ -459,7 +513,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.ChatGroupSend.verify(message.chatGroupSend);
+                    let error = $root.ws.ChatGroupSend.verify(message.chatGroupSend);
                     if (error)
                         return "chatGroupSend." + error;
                 }
@@ -469,7 +523,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.GroupMember.verify(message.groupMemberReq);
+                    let error = $root.ws.GroupMember.verify(message.groupMemberReq);
                     if (error)
                         return "groupMemberReq." + error;
                 }
@@ -479,7 +533,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomCreate.verify(message.roomCreate);
+                    let error = $root.ws.RoomCreate.verify(message.roomCreate);
                     if (error)
                         return "roomCreate." + error;
                 }
@@ -489,7 +543,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomJoin.verify(message.roomJoin);
+                    let error = $root.ws.RoomJoin.verify(message.roomJoin);
                     if (error)
                         return "roomJoin." + error;
                 }
@@ -499,7 +553,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomLeave.verify(message.roomLeave);
+                    let error = $root.ws.RoomLeave.verify(message.roomLeave);
                     if (error)
                         return "roomLeave." + error;
                 }
@@ -509,7 +563,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomKick.verify(message.roomKick);
+                    let error = $root.ws.RoomKick.verify(message.roomKick);
                     if (error)
                         return "roomKick." + error;
                 }
@@ -519,7 +573,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomDelete.verify(message.roomDelete);
+                    let error = $root.ws.RoomDelete.verify(message.roomDelete);
                     if (error)
                         return "roomDelete." + error;
                 }
@@ -529,9 +583,49 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomSend.verify(message.roomSend);
+                    let error = $root.ws.RoomSend.verify(message.roomSend);
                     if (error)
                         return "roomSend." + error;
+                }
+            }
+            if (message.inventoryAdd != null && message.hasOwnProperty("inventoryAdd")) {
+                if (properties.msg === 1)
+                    return "msg: multiple values";
+                properties.msg = 1;
+                {
+                    let error = $root.ws.InventoryAdd.verify(message.inventoryAdd);
+                    if (error)
+                        return "inventoryAdd." + error;
+                }
+            }
+            if (message.inventoryConsume != null && message.hasOwnProperty("inventoryConsume")) {
+                if (properties.msg === 1)
+                    return "msg: multiple values";
+                properties.msg = 1;
+                {
+                    let error = $root.ws.InventoryConsume.verify(message.inventoryConsume);
+                    if (error)
+                        return "inventoryConsume." + error;
+                }
+            }
+            if (message.inventoryDrop != null && message.hasOwnProperty("inventoryDrop")) {
+                if (properties.msg === 1)
+                    return "msg: multiple values";
+                properties.msg = 1;
+                {
+                    let error = $root.ws.InventoryDrop.verify(message.inventoryDrop);
+                    if (error)
+                        return "inventoryDrop." + error;
+                }
+            }
+            if (message.inventoryGet != null && message.hasOwnProperty("inventoryGet")) {
+                if (properties.msg === 1)
+                    return "msg: multiple values";
+                properties.msg = 1;
+                {
+                    let error = $root.ws.InventoryGet.verify(message.inventoryGet);
+                    if (error)
+                        return "inventoryGet." + error;
                 }
             }
             if (message.msgJson != null && message.hasOwnProperty("msgJson"))
@@ -551,7 +645,7 @@ $root.ws = (function() {
         WSReq.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.WSReq)
                 return object;
-            var message = new $root.ws.WSReq();
+            let message = new $root.ws.WSReq();
             if (object.seq != null)
                 if ($util.Long)
                     (message.seq = $util.Long.fromValue(object.seq)).unsigned = false;
@@ -629,6 +723,26 @@ $root.ws = (function() {
                     throw TypeError(".ws.WSReq.roomSend: object expected");
                 message.roomSend = $root.ws.RoomSend.fromObject(object.roomSend);
             }
+            if (object.inventoryAdd != null) {
+                if (typeof object.inventoryAdd !== "object")
+                    throw TypeError(".ws.WSReq.inventoryAdd: object expected");
+                message.inventoryAdd = $root.ws.InventoryAdd.fromObject(object.inventoryAdd);
+            }
+            if (object.inventoryConsume != null) {
+                if (typeof object.inventoryConsume !== "object")
+                    throw TypeError(".ws.WSReq.inventoryConsume: object expected");
+                message.inventoryConsume = $root.ws.InventoryConsume.fromObject(object.inventoryConsume);
+            }
+            if (object.inventoryDrop != null) {
+                if (typeof object.inventoryDrop !== "object")
+                    throw TypeError(".ws.WSReq.inventoryDrop: object expected");
+                message.inventoryDrop = $root.ws.InventoryDrop.fromObject(object.inventoryDrop);
+            }
+            if (object.inventoryGet != null) {
+                if (typeof object.inventoryGet !== "object")
+                    throw TypeError(".ws.WSReq.inventoryGet: object expected");
+                message.inventoryGet = $root.ws.InventoryGet.fromObject(object.inventoryGet);
+            }
             if (object.msgJson != null)
                 message.msgJson = String(object.msgJson);
             return message;
@@ -646,10 +760,10 @@ $root.ws = (function() {
         WSReq.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 if ($util.Long) {
-                    var long = new $util.Long(0, 0, false);
+                    let long = new $util.Long(0, 0, false);
                     object.seq = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
                 } else
                     object.seq = options.longs === String ? "0" : 0;
@@ -732,6 +846,26 @@ $root.ws = (function() {
                 if (options.oneofs)
                     object.msg = "roomSend";
             }
+            if (message.inventoryAdd != null && message.hasOwnProperty("inventoryAdd")) {
+                object.inventoryAdd = $root.ws.InventoryAdd.toObject(message.inventoryAdd, options);
+                if (options.oneofs)
+                    object.msg = "inventoryAdd";
+            }
+            if (message.inventoryConsume != null && message.hasOwnProperty("inventoryConsume")) {
+                object.inventoryConsume = $root.ws.InventoryConsume.toObject(message.inventoryConsume, options);
+                if (options.oneofs)
+                    object.msg = "inventoryConsume";
+            }
+            if (message.inventoryDrop != null && message.hasOwnProperty("inventoryDrop")) {
+                object.inventoryDrop = $root.ws.InventoryDrop.toObject(message.inventoryDrop, options);
+                if (options.oneofs)
+                    object.msg = "inventoryDrop";
+            }
+            if (message.inventoryGet != null && message.hasOwnProperty("inventoryGet")) {
+                object.inventoryGet = $root.ws.InventoryGet.toObject(message.inventoryGet, options);
+                if (options.oneofs)
+                    object.msg = "inventoryGet";
+            }
             if (message.msgJson != null && message.hasOwnProperty("msgJson"))
                 object.msgJson = message.msgJson;
             return object;
@@ -773,6 +907,10 @@ $root.ws = (function() {
          * @property {ws.IRoomNotice|null} [roomNotice] WSResp roomNotice
          * @property {ws.ISystemBroadcast|null} [systemBroadcast] WSResp systemBroadcast
          * @property {ws.ISystemPush|null} [systemPush] WSResp systemPush
+         * @property {ws.IInventoryAddResp|null} [inventoryAddResp] WSResp inventoryAddResp
+         * @property {ws.IInventoryConsumeResp|null} [inventoryConsumeResp] WSResp inventoryConsumeResp
+         * @property {ws.IInventoryDropResp|null} [inventoryDropResp] WSResp inventoryDropResp
+         * @property {ws.IInventoryGetResp|null} [inventoryGetResp] WSResp inventoryGetResp
          * @property {string|null} [msgJson] WSResp msgJson
          */
 
@@ -786,7 +924,7 @@ $root.ws = (function() {
          */
         function WSResp(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -920,6 +1058,38 @@ $root.ws = (function() {
         WSResp.prototype.systemPush = null;
 
         /**
+         * WSResp inventoryAddResp.
+         * @member {ws.IInventoryAddResp|null|undefined} inventoryAddResp
+         * @memberof ws.WSResp
+         * @instance
+         */
+        WSResp.prototype.inventoryAddResp = null;
+
+        /**
+         * WSResp inventoryConsumeResp.
+         * @member {ws.IInventoryConsumeResp|null|undefined} inventoryConsumeResp
+         * @memberof ws.WSResp
+         * @instance
+         */
+        WSResp.prototype.inventoryConsumeResp = null;
+
+        /**
+         * WSResp inventoryDropResp.
+         * @member {ws.IInventoryDropResp|null|undefined} inventoryDropResp
+         * @memberof ws.WSResp
+         * @instance
+         */
+        WSResp.prototype.inventoryDropResp = null;
+
+        /**
+         * WSResp inventoryGetResp.
+         * @member {ws.IInventoryGetResp|null|undefined} inventoryGetResp
+         * @memberof ws.WSResp
+         * @instance
+         */
+        WSResp.prototype.inventoryGetResp = null;
+
+        /**
          * WSResp msgJson.
          * @member {string} msgJson
          * @memberof ws.WSResp
@@ -928,16 +1098,16 @@ $root.ws = (function() {
         WSResp.prototype.msgJson = "";
 
         // OneOf field names bound to virtual getters and setters
-        var $oneOfFields;
+        let $oneOfFields;
 
         /**
          * WSResp msg.
-         * @member {"accountLoginResp"|"accountRegisterResp"|"chatWorldNew"|"chatPrivateNew"|"chatGroupNew"|"groupMemberResp"|"chatOnlineResp"|"roomCreateResp"|"roomJoinResp"|"roomChatNew"|"roomNotice"|"systemBroadcast"|"systemPush"|undefined} msg
+         * @member {"accountLoginResp"|"accountRegisterResp"|"chatWorldNew"|"chatPrivateNew"|"chatGroupNew"|"groupMemberResp"|"chatOnlineResp"|"roomCreateResp"|"roomJoinResp"|"roomChatNew"|"roomNotice"|"systemBroadcast"|"systemPush"|"inventoryAddResp"|"inventoryConsumeResp"|"inventoryDropResp"|"inventoryGetResp"|undefined} msg
          * @memberof ws.WSResp
          * @instance
          */
         Object.defineProperty(WSResp.prototype, "msg", {
-            get: $util.oneOfGetter($oneOfFields = ["accountLoginResp", "accountRegisterResp", "chatWorldNew", "chatPrivateNew", "chatGroupNew", "groupMemberResp", "chatOnlineResp", "roomCreateResp", "roomJoinResp", "roomChatNew", "roomNotice", "systemBroadcast", "systemPush"]),
+            get: $util.oneOfGetter($oneOfFields = ["accountLoginResp", "accountRegisterResp", "chatWorldNew", "chatPrivateNew", "chatGroupNew", "groupMemberResp", "chatOnlineResp", "roomCreateResp", "roomJoinResp", "roomChatNew", "roomNotice", "systemBroadcast", "systemPush", "inventoryAddResp", "inventoryConsumeResp", "inventoryDropResp", "inventoryGetResp"]),
             set: $util.oneOfSetter($oneOfFields)
         });
 
@@ -997,6 +1167,14 @@ $root.ws = (function() {
                 $root.ws.SystemBroadcast.encode(message.systemBroadcast, writer.uint32(/* id 40, wireType 2 =*/322).fork()).ldelim();
             if (message.systemPush != null && Object.hasOwnProperty.call(message, "systemPush"))
                 $root.ws.SystemPush.encode(message.systemPush, writer.uint32(/* id 41, wireType 2 =*/330).fork()).ldelim();
+            if (message.inventoryAddResp != null && Object.hasOwnProperty.call(message, "inventoryAddResp"))
+                $root.ws.InventoryAddResp.encode(message.inventoryAddResp, writer.uint32(/* id 50, wireType 2 =*/402).fork()).ldelim();
+            if (message.inventoryConsumeResp != null && Object.hasOwnProperty.call(message, "inventoryConsumeResp"))
+                $root.ws.InventoryConsumeResp.encode(message.inventoryConsumeResp, writer.uint32(/* id 51, wireType 2 =*/410).fork()).ldelim();
+            if (message.inventoryDropResp != null && Object.hasOwnProperty.call(message, "inventoryDropResp"))
+                $root.ws.InventoryDropResp.encode(message.inventoryDropResp, writer.uint32(/* id 52, wireType 2 =*/418).fork()).ldelim();
+            if (message.inventoryGetResp != null && Object.hasOwnProperty.call(message, "inventoryGetResp"))
+                $root.ws.InventoryGetResp.encode(message.inventoryGetResp, writer.uint32(/* id 53, wireType 2 =*/426).fork()).ldelim();
             if (message.msgJson != null && Object.hasOwnProperty.call(message, "msgJson"))
                 writer.uint32(/* id 100, wireType 2 =*/802).string(message.msgJson);
             return writer;
@@ -1029,9 +1207,9 @@ $root.ws = (function() {
         WSResp.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.WSResp();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.WSResp();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.seq = reader.int64();
@@ -1081,6 +1259,18 @@ $root.ws = (function() {
                 case 41:
                     message.systemPush = $root.ws.SystemPush.decode(reader, reader.uint32());
                     break;
+                case 50:
+                    message.inventoryAddResp = $root.ws.InventoryAddResp.decode(reader, reader.uint32());
+                    break;
+                case 51:
+                    message.inventoryConsumeResp = $root.ws.InventoryConsumeResp.decode(reader, reader.uint32());
+                    break;
+                case 52:
+                    message.inventoryDropResp = $root.ws.InventoryDropResp.decode(reader, reader.uint32());
+                    break;
+                case 53:
+                    message.inventoryGetResp = $root.ws.InventoryGetResp.decode(reader, reader.uint32());
+                    break;
                 case 100:
                     message.msgJson = reader.string();
                     break;
@@ -1119,7 +1309,7 @@ $root.ws = (function() {
         WSResp.verify = function verify(message) {
             if (typeof message !== "object" || message === null)
                 return "object expected";
-            var properties = {};
+            let properties = {};
             if (message.seq != null && message.hasOwnProperty("seq"))
                 if (!$util.isInteger(message.seq) && !(message.seq && $util.isInteger(message.seq.low) && $util.isInteger(message.seq.high)))
                     return "seq: integer|Long expected";
@@ -1132,7 +1322,7 @@ $root.ws = (function() {
             if (message.accountLoginResp != null && message.hasOwnProperty("accountLoginResp")) {
                 properties.msg = 1;
                 {
-                    var error = $root.ws.AccountLoginResp.verify(message.accountLoginResp);
+                    let error = $root.ws.AccountLoginResp.verify(message.accountLoginResp);
                     if (error)
                         return "accountLoginResp." + error;
                 }
@@ -1142,7 +1332,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.AccountRegisterResp.verify(message.accountRegisterResp);
+                    let error = $root.ws.AccountRegisterResp.verify(message.accountRegisterResp);
                     if (error)
                         return "accountRegisterResp." + error;
                 }
@@ -1152,7 +1342,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.ChatWorldNew.verify(message.chatWorldNew);
+                    let error = $root.ws.ChatWorldNew.verify(message.chatWorldNew);
                     if (error)
                         return "chatWorldNew." + error;
                 }
@@ -1162,7 +1352,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.ChatPrivateNew.verify(message.chatPrivateNew);
+                    let error = $root.ws.ChatPrivateNew.verify(message.chatPrivateNew);
                     if (error)
                         return "chatPrivateNew." + error;
                 }
@@ -1172,7 +1362,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.ChatGroupNew.verify(message.chatGroupNew);
+                    let error = $root.ws.ChatGroupNew.verify(message.chatGroupNew);
                     if (error)
                         return "chatGroupNew." + error;
                 }
@@ -1182,7 +1372,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.GroupMemberResp.verify(message.groupMemberResp);
+                    let error = $root.ws.GroupMemberResp.verify(message.groupMemberResp);
                     if (error)
                         return "groupMemberResp." + error;
                 }
@@ -1192,7 +1382,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.ChatOnlineResp.verify(message.chatOnlineResp);
+                    let error = $root.ws.ChatOnlineResp.verify(message.chatOnlineResp);
                     if (error)
                         return "chatOnlineResp." + error;
                 }
@@ -1202,7 +1392,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomCreateResp.verify(message.roomCreateResp);
+                    let error = $root.ws.RoomCreateResp.verify(message.roomCreateResp);
                     if (error)
                         return "roomCreateResp." + error;
                 }
@@ -1212,7 +1402,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomJoinResp.verify(message.roomJoinResp);
+                    let error = $root.ws.RoomJoinResp.verify(message.roomJoinResp);
                     if (error)
                         return "roomJoinResp." + error;
                 }
@@ -1222,7 +1412,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomChatNew.verify(message.roomChatNew);
+                    let error = $root.ws.RoomChatNew.verify(message.roomChatNew);
                     if (error)
                         return "roomChatNew." + error;
                 }
@@ -1232,7 +1422,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.RoomNotice.verify(message.roomNotice);
+                    let error = $root.ws.RoomNotice.verify(message.roomNotice);
                     if (error)
                         return "roomNotice." + error;
                 }
@@ -1242,7 +1432,7 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.SystemBroadcast.verify(message.systemBroadcast);
+                    let error = $root.ws.SystemBroadcast.verify(message.systemBroadcast);
                     if (error)
                         return "systemBroadcast." + error;
                 }
@@ -1252,9 +1442,49 @@ $root.ws = (function() {
                     return "msg: multiple values";
                 properties.msg = 1;
                 {
-                    var error = $root.ws.SystemPush.verify(message.systemPush);
+                    let error = $root.ws.SystemPush.verify(message.systemPush);
                     if (error)
                         return "systemPush." + error;
+                }
+            }
+            if (message.inventoryAddResp != null && message.hasOwnProperty("inventoryAddResp")) {
+                if (properties.msg === 1)
+                    return "msg: multiple values";
+                properties.msg = 1;
+                {
+                    let error = $root.ws.InventoryAddResp.verify(message.inventoryAddResp);
+                    if (error)
+                        return "inventoryAddResp." + error;
+                }
+            }
+            if (message.inventoryConsumeResp != null && message.hasOwnProperty("inventoryConsumeResp")) {
+                if (properties.msg === 1)
+                    return "msg: multiple values";
+                properties.msg = 1;
+                {
+                    let error = $root.ws.InventoryConsumeResp.verify(message.inventoryConsumeResp);
+                    if (error)
+                        return "inventoryConsumeResp." + error;
+                }
+            }
+            if (message.inventoryDropResp != null && message.hasOwnProperty("inventoryDropResp")) {
+                if (properties.msg === 1)
+                    return "msg: multiple values";
+                properties.msg = 1;
+                {
+                    let error = $root.ws.InventoryDropResp.verify(message.inventoryDropResp);
+                    if (error)
+                        return "inventoryDropResp." + error;
+                }
+            }
+            if (message.inventoryGetResp != null && message.hasOwnProperty("inventoryGetResp")) {
+                if (properties.msg === 1)
+                    return "msg: multiple values";
+                properties.msg = 1;
+                {
+                    let error = $root.ws.InventoryGetResp.verify(message.inventoryGetResp);
+                    if (error)
+                        return "inventoryGetResp." + error;
                 }
             }
             if (message.msgJson != null && message.hasOwnProperty("msgJson"))
@@ -1274,7 +1504,7 @@ $root.ws = (function() {
         WSResp.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.WSResp)
                 return object;
-            var message = new $root.ws.WSResp();
+            let message = new $root.ws.WSResp();
             if (object.seq != null)
                 if ($util.Long)
                     (message.seq = $util.Long.fromValue(object.seq)).unsigned = false;
@@ -1353,6 +1583,26 @@ $root.ws = (function() {
                     throw TypeError(".ws.WSResp.systemPush: object expected");
                 message.systemPush = $root.ws.SystemPush.fromObject(object.systemPush);
             }
+            if (object.inventoryAddResp != null) {
+                if (typeof object.inventoryAddResp !== "object")
+                    throw TypeError(".ws.WSResp.inventoryAddResp: object expected");
+                message.inventoryAddResp = $root.ws.InventoryAddResp.fromObject(object.inventoryAddResp);
+            }
+            if (object.inventoryConsumeResp != null) {
+                if (typeof object.inventoryConsumeResp !== "object")
+                    throw TypeError(".ws.WSResp.inventoryConsumeResp: object expected");
+                message.inventoryConsumeResp = $root.ws.InventoryConsumeResp.fromObject(object.inventoryConsumeResp);
+            }
+            if (object.inventoryDropResp != null) {
+                if (typeof object.inventoryDropResp !== "object")
+                    throw TypeError(".ws.WSResp.inventoryDropResp: object expected");
+                message.inventoryDropResp = $root.ws.InventoryDropResp.fromObject(object.inventoryDropResp);
+            }
+            if (object.inventoryGetResp != null) {
+                if (typeof object.inventoryGetResp !== "object")
+                    throw TypeError(".ws.WSResp.inventoryGetResp: object expected");
+                message.inventoryGetResp = $root.ws.InventoryGetResp.fromObject(object.inventoryGetResp);
+            }
             if (object.msgJson != null)
                 message.msgJson = String(object.msgJson);
             return message;
@@ -1370,10 +1620,10 @@ $root.ws = (function() {
         WSResp.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 if ($util.Long) {
-                    var long = new $util.Long(0, 0, false);
+                    let long = new $util.Long(0, 0, false);
                     object.seq = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
                 } else
                     object.seq = options.longs === String ? "0" : 0;
@@ -1455,6 +1705,26 @@ $root.ws = (function() {
                 if (options.oneofs)
                     object.msg = "systemPush";
             }
+            if (message.inventoryAddResp != null && message.hasOwnProperty("inventoryAddResp")) {
+                object.inventoryAddResp = $root.ws.InventoryAddResp.toObject(message.inventoryAddResp, options);
+                if (options.oneofs)
+                    object.msg = "inventoryAddResp";
+            }
+            if (message.inventoryConsumeResp != null && message.hasOwnProperty("inventoryConsumeResp")) {
+                object.inventoryConsumeResp = $root.ws.InventoryConsumeResp.toObject(message.inventoryConsumeResp, options);
+                if (options.oneofs)
+                    object.msg = "inventoryConsumeResp";
+            }
+            if (message.inventoryDropResp != null && message.hasOwnProperty("inventoryDropResp")) {
+                object.inventoryDropResp = $root.ws.InventoryDropResp.toObject(message.inventoryDropResp, options);
+                if (options.oneofs)
+                    object.msg = "inventoryDropResp";
+            }
+            if (message.inventoryGetResp != null && message.hasOwnProperty("inventoryGetResp")) {
+                object.inventoryGetResp = $root.ws.InventoryGetResp.toObject(message.inventoryGetResp, options);
+                if (options.oneofs)
+                    object.msg = "inventoryGetResp";
+            }
             if (message.msgJson != null && message.hasOwnProperty("msgJson"))
                 object.msgJson = message.msgJson;
             return object;
@@ -1494,7 +1764,7 @@ $root.ws = (function() {
          */
         function AccountLogin(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -1573,9 +1843,9 @@ $root.ws = (function() {
         AccountLogin.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.AccountLogin();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.AccountLogin();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.username = reader.string();
@@ -1638,7 +1908,7 @@ $root.ws = (function() {
         AccountLogin.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.AccountLogin)
                 return object;
-            var message = new $root.ws.AccountLogin();
+            let message = new $root.ws.AccountLogin();
             if (object.username != null)
                 message.username = String(object.username);
             if (object.password != null)
@@ -1658,7 +1928,7 @@ $root.ws = (function() {
         AccountLogin.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.username = "";
                 object.password = "";
@@ -1707,7 +1977,7 @@ $root.ws = (function() {
         function AccountLoginResp(properties) {
             this.items = {};
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -1775,7 +2045,7 @@ $root.ws = (function() {
             if (message.uid != null && Object.hasOwnProperty.call(message, "uid"))
                 writer.uint32(/* id 3, wireType 2 =*/26).string(message.uid);
             if (message.items != null && Object.hasOwnProperty.call(message, "items"))
-                for (var keys = Object.keys(message.items), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(message.items), i = 0; i < keys.length; ++i)
                     writer.uint32(/* id 4, wireType 2 =*/34).fork().uint32(/* id 1, wireType 2 =*/10).string(keys[i]).uint32(/* id 2, wireType 0 =*/16).int64(message.items[keys[i]]).ldelim();
             return writer;
         };
@@ -1807,9 +2077,9 @@ $root.ws = (function() {
         AccountLoginResp.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.AccountLoginResp(), key, value;
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.AccountLoginResp(), key, value;
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.username = reader.string();
@@ -1823,11 +2093,11 @@ $root.ws = (function() {
                 case 4:
                     if (message.items === $util.emptyObject)
                         message.items = {};
-                    var end2 = reader.uint32() + reader.pos;
+                    let end2 = reader.uint32() + reader.pos;
                     key = "";
                     value = 0;
                     while (reader.pos < end2) {
-                        var tag2 = reader.uint32();
+                        let tag2 = reader.uint32();
                         switch (tag2 >>> 3) {
                         case 1:
                             key = reader.string();
@@ -1889,8 +2159,8 @@ $root.ws = (function() {
             if (message.items != null && message.hasOwnProperty("items")) {
                 if (!$util.isObject(message.items))
                     return "items: object expected";
-                var key = Object.keys(message.items);
-                for (var i = 0; i < key.length; ++i)
+                let key = Object.keys(message.items);
+                for (let i = 0; i < key.length; ++i)
                     if (!$util.isInteger(message.items[key[i]]) && !(message.items[key[i]] && $util.isInteger(message.items[key[i]].low) && $util.isInteger(message.items[key[i]].high)))
                         return "items: integer|Long{k:string} expected";
             }
@@ -1908,7 +2178,7 @@ $root.ws = (function() {
         AccountLoginResp.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.AccountLoginResp)
                 return object;
-            var message = new $root.ws.AccountLoginResp();
+            let message = new $root.ws.AccountLoginResp();
             if (object.username != null)
                 message.username = String(object.username);
             if (object.token != null)
@@ -1919,7 +2189,7 @@ $root.ws = (function() {
                 if (typeof object.items !== "object")
                     throw TypeError(".ws.AccountLoginResp.items: object expected");
                 message.items = {};
-                for (var keys = Object.keys(object.items), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(object.items), i = 0; i < keys.length; ++i)
                     if ($util.Long)
                         (message.items[keys[i]] = $util.Long.fromValue(object.items[keys[i]])).unsigned = false;
                     else if (typeof object.items[keys[i]] === "string")
@@ -1944,7 +2214,7 @@ $root.ws = (function() {
         AccountLoginResp.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.objects || options.defaults)
                 object.items = {};
             if (options.defaults) {
@@ -1958,10 +2228,10 @@ $root.ws = (function() {
                 object.token = message.token;
             if (message.uid != null && message.hasOwnProperty("uid"))
                 object.uid = message.uid;
-            var keys2;
+            let keys2;
             if (message.items && (keys2 = Object.keys(message.items)).length) {
                 object.items = {};
-                for (var j = 0; j < keys2.length; ++j)
+                for (let j = 0; j < keys2.length; ++j)
                     if (typeof message.items[keys2[j]] === "number")
                         object.items[keys2[j]] = options.longs === String ? String(message.items[keys2[j]]) : message.items[keys2[j]];
                     else
@@ -2004,7 +2274,7 @@ $root.ws = (function() {
          */
         function AccountRegister(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -2083,9 +2353,9 @@ $root.ws = (function() {
         AccountRegister.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.AccountRegister();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.AccountRegister();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.username = reader.string();
@@ -2148,7 +2418,7 @@ $root.ws = (function() {
         AccountRegister.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.AccountRegister)
                 return object;
-            var message = new $root.ws.AccountRegister();
+            let message = new $root.ws.AccountRegister();
             if (object.username != null)
                 message.username = String(object.username);
             if (object.password != null)
@@ -2168,7 +2438,7 @@ $root.ws = (function() {
         AccountRegister.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.username = "";
                 object.password = "";
@@ -2214,7 +2484,7 @@ $root.ws = (function() {
          */
         function AccountRegisterResp(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -2293,9 +2563,9 @@ $root.ws = (function() {
         AccountRegisterResp.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.AccountRegisterResp();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.AccountRegisterResp();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.username = reader.string();
@@ -2358,7 +2628,7 @@ $root.ws = (function() {
         AccountRegisterResp.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.AccountRegisterResp)
                 return object;
-            var message = new $root.ws.AccountRegisterResp();
+            let message = new $root.ws.AccountRegisterResp();
             if (object.username != null)
                 message.username = String(object.username);
             if (object.uid != null)
@@ -2378,7 +2648,7 @@ $root.ws = (function() {
         AccountRegisterResp.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.username = "";
                 object.uid = "";
@@ -2423,7 +2693,7 @@ $root.ws = (function() {
          */
         function ChatWorldSend(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -2492,9 +2762,9 @@ $root.ws = (function() {
         ChatWorldSend.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatWorldSend();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatWorldSend();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.content = reader.string();
@@ -2551,7 +2821,7 @@ $root.ws = (function() {
         ChatWorldSend.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.ChatWorldSend)
                 return object;
-            var message = new $root.ws.ChatWorldSend();
+            let message = new $root.ws.ChatWorldSend();
             if (object.content != null)
                 message.content = String(object.content);
             return message;
@@ -2569,7 +2839,7 @@ $root.ws = (function() {
         ChatWorldSend.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults)
                 object.content = "";
             if (message.content != null && message.hasOwnProperty("content"))
@@ -2611,7 +2881,7 @@ $root.ws = (function() {
          */
         function ChatPrivateSend(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -2690,9 +2960,9 @@ $root.ws = (function() {
         ChatPrivateSend.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatPrivateSend();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatPrivateSend();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.toUid = reader.string();
@@ -2755,7 +3025,7 @@ $root.ws = (function() {
         ChatPrivateSend.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.ChatPrivateSend)
                 return object;
-            var message = new $root.ws.ChatPrivateSend();
+            let message = new $root.ws.ChatPrivateSend();
             if (object.toUid != null)
                 message.toUid = String(object.toUid);
             if (object.content != null)
@@ -2775,7 +3045,7 @@ $root.ws = (function() {
         ChatPrivateSend.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.toUid = "";
                 object.content = "";
@@ -2821,7 +3091,7 @@ $root.ws = (function() {
          */
         function ChatGroupSend(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -2900,9 +3170,9 @@ $root.ws = (function() {
         ChatGroupSend.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatGroupSend();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatGroupSend();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.groupId = reader.string();
@@ -2965,7 +3235,7 @@ $root.ws = (function() {
         ChatGroupSend.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.ChatGroupSend)
                 return object;
-            var message = new $root.ws.ChatGroupSend();
+            let message = new $root.ws.ChatGroupSend();
             if (object.groupId != null)
                 message.groupId = String(object.groupId);
             if (object.content != null)
@@ -2985,7 +3255,7 @@ $root.ws = (function() {
         ChatGroupSend.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.groupId = "";
                 object.content = "";
@@ -3030,7 +3300,7 @@ $root.ws = (function() {
          */
         function GroupMember(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -3099,9 +3369,9 @@ $root.ws = (function() {
         GroupMember.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.GroupMember();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.GroupMember();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.groupId = reader.string();
@@ -3158,7 +3428,7 @@ $root.ws = (function() {
         GroupMember.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.GroupMember)
                 return object;
-            var message = new $root.ws.GroupMember();
+            let message = new $root.ws.GroupMember();
             if (object.groupId != null)
                 message.groupId = String(object.groupId);
             return message;
@@ -3176,7 +3446,7 @@ $root.ws = (function() {
         GroupMember.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults)
                 object.groupId = "";
             if (message.groupId != null && message.hasOwnProperty("groupId"))
@@ -3220,7 +3490,7 @@ $root.ws = (function() {
         function GroupMemberResp(properties) {
             this.members = [];
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -3276,7 +3546,7 @@ $root.ws = (function() {
             if (message.groupId != null && Object.hasOwnProperty.call(message, "groupId"))
                 writer.uint32(/* id 1, wireType 2 =*/10).string(message.groupId);
             if (message.members != null && message.members.length)
-                for (var i = 0; i < message.members.length; ++i)
+                for (let i = 0; i < message.members.length; ++i)
                     writer.uint32(/* id 2, wireType 2 =*/18).string(message.members[i]);
             if (message.count != null && Object.hasOwnProperty.call(message, "count"))
                 writer.uint32(/* id 3, wireType 0 =*/24).int32(message.count);
@@ -3310,9 +3580,9 @@ $root.ws = (function() {
         GroupMemberResp.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.GroupMemberResp();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.GroupMemberResp();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.groupId = reader.string();
@@ -3366,7 +3636,7 @@ $root.ws = (function() {
             if (message.members != null && message.hasOwnProperty("members")) {
                 if (!Array.isArray(message.members))
                     return "members: array expected";
-                for (var i = 0; i < message.members.length; ++i)
+                for (let i = 0; i < message.members.length; ++i)
                     if (!$util.isString(message.members[i]))
                         return "members: string[] expected";
             }
@@ -3387,14 +3657,14 @@ $root.ws = (function() {
         GroupMemberResp.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.GroupMemberResp)
                 return object;
-            var message = new $root.ws.GroupMemberResp();
+            let message = new $root.ws.GroupMemberResp();
             if (object.groupId != null)
                 message.groupId = String(object.groupId);
             if (object.members) {
                 if (!Array.isArray(object.members))
                     throw TypeError(".ws.GroupMemberResp.members: array expected");
                 message.members = [];
-                for (var i = 0; i < object.members.length; ++i)
+                for (let i = 0; i < object.members.length; ++i)
                     message.members[i] = String(object.members[i]);
             }
             if (object.count != null)
@@ -3414,7 +3684,7 @@ $root.ws = (function() {
         GroupMemberResp.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.arrays || options.defaults)
                 object.members = [];
             if (options.defaults) {
@@ -3425,7 +3695,7 @@ $root.ws = (function() {
                 object.groupId = message.groupId;
             if (message.members && message.members.length) {
                 object.members = [];
-                for (var j = 0; j < message.members.length; ++j)
+                for (let j = 0; j < message.members.length; ++j)
                     object.members[j] = message.members[j];
             }
             if (message.count != null && message.hasOwnProperty("count"))
@@ -3468,7 +3738,7 @@ $root.ws = (function() {
         function ChatOnlineResp(properties) {
             this.uids = [];
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -3516,7 +3786,7 @@ $root.ws = (function() {
             if (message.total != null && Object.hasOwnProperty.call(message, "total"))
                 writer.uint32(/* id 1, wireType 0 =*/8).int32(message.total);
             if (message.uids != null && message.uids.length)
-                for (var i = 0; i < message.uids.length; ++i)
+                for (let i = 0; i < message.uids.length; ++i)
                     writer.uint32(/* id 2, wireType 2 =*/18).string(message.uids[i]);
             return writer;
         };
@@ -3548,9 +3818,9 @@ $root.ws = (function() {
         ChatOnlineResp.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatOnlineResp();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatOnlineResp();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.total = reader.int32();
@@ -3601,7 +3871,7 @@ $root.ws = (function() {
             if (message.uids != null && message.hasOwnProperty("uids")) {
                 if (!Array.isArray(message.uids))
                     return "uids: array expected";
-                for (var i = 0; i < message.uids.length; ++i)
+                for (let i = 0; i < message.uids.length; ++i)
                     if (!$util.isString(message.uids[i]))
                         return "uids: string[] expected";
             }
@@ -3619,14 +3889,14 @@ $root.ws = (function() {
         ChatOnlineResp.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.ChatOnlineResp)
                 return object;
-            var message = new $root.ws.ChatOnlineResp();
+            let message = new $root.ws.ChatOnlineResp();
             if (object.total != null)
                 message.total = object.total | 0;
             if (object.uids) {
                 if (!Array.isArray(object.uids))
                     throw TypeError(".ws.ChatOnlineResp.uids: array expected");
                 message.uids = [];
-                for (var i = 0; i < object.uids.length; ++i)
+                for (let i = 0; i < object.uids.length; ++i)
                     message.uids[i] = String(object.uids[i]);
             }
             return message;
@@ -3644,7 +3914,7 @@ $root.ws = (function() {
         ChatOnlineResp.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.arrays || options.defaults)
                 object.uids = [];
             if (options.defaults)
@@ -3653,7 +3923,7 @@ $root.ws = (function() {
                 object.total = message.total;
             if (message.uids && message.uids.length) {
                 object.uids = [];
-                for (var j = 0; j < message.uids.length; ++j)
+                for (let j = 0; j < message.uids.length; ++j)
                     object.uids[j] = message.uids[j];
             }
             return object;
@@ -3696,7 +3966,7 @@ $root.ws = (function() {
          */
         function ChatWorldNew(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -3805,9 +4075,9 @@ $root.ws = (function() {
         ChatWorldNew.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatWorldNew();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatWorldNew();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.msgId = reader.string();
@@ -3888,7 +4158,7 @@ $root.ws = (function() {
         ChatWorldNew.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.ChatWorldNew)
                 return object;
-            var message = new $root.ws.ChatWorldNew();
+            let message = new $root.ws.ChatWorldNew();
             if (object.msgId != null)
                 message.msgId = String(object.msgId);
             if (object.fromUid != null)
@@ -3921,14 +4191,14 @@ $root.ws = (function() {
         ChatWorldNew.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.msgId = "";
                 object.fromUid = "";
                 object.fromName = "";
                 object.content = "";
                 if ($util.Long) {
-                    var long = new $util.Long(0, 0, false);
+                    let long = new $util.Long(0, 0, false);
                     object.timestamp = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
                 } else
                     object.timestamp = options.longs === String ? "0" : 0;
@@ -3986,7 +4256,7 @@ $root.ws = (function() {
          */
         function ChatPrivateNew(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -4095,9 +4365,9 @@ $root.ws = (function() {
         ChatPrivateNew.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatPrivateNew();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatPrivateNew();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.msgId = reader.string();
@@ -4178,7 +4448,7 @@ $root.ws = (function() {
         ChatPrivateNew.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.ChatPrivateNew)
                 return object;
-            var message = new $root.ws.ChatPrivateNew();
+            let message = new $root.ws.ChatPrivateNew();
             if (object.msgId != null)
                 message.msgId = String(object.msgId);
             if (object.fromUid != null)
@@ -4211,14 +4481,14 @@ $root.ws = (function() {
         ChatPrivateNew.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.msgId = "";
                 object.fromUid = "";
                 object.fromName = "";
                 object.content = "";
                 if ($util.Long) {
-                    var long = new $util.Long(0, 0, false);
+                    let long = new $util.Long(0, 0, false);
                     object.timestamp = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
                 } else
                     object.timestamp = options.longs === String ? "0" : 0;
@@ -4277,7 +4547,7 @@ $root.ws = (function() {
          */
         function ChatGroupNew(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -4396,9 +4666,9 @@ $root.ws = (function() {
         ChatGroupNew.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatGroupNew();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ChatGroupNew();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.msgId = reader.string();
@@ -4485,7 +4755,7 @@ $root.ws = (function() {
         ChatGroupNew.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.ChatGroupNew)
                 return object;
-            var message = new $root.ws.ChatGroupNew();
+            let message = new $root.ws.ChatGroupNew();
             if (object.msgId != null)
                 message.msgId = String(object.msgId);
             if (object.groupId != null)
@@ -4520,7 +4790,7 @@ $root.ws = (function() {
         ChatGroupNew.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.msgId = "";
                 object.groupId = "";
@@ -4528,7 +4798,7 @@ $root.ws = (function() {
                 object.fromName = "";
                 object.content = "";
                 if ($util.Long) {
-                    var long = new $util.Long(0, 0, false);
+                    let long = new $util.Long(0, 0, false);
                     object.timestamp = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
                 } else
                     object.timestamp = options.longs === String ? "0" : 0;
@@ -4585,7 +4855,7 @@ $root.ws = (function() {
          */
         function RoomCreate(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -4664,9 +4934,9 @@ $root.ws = (function() {
         RoomCreate.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomCreate();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomCreate();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.name = reader.string();
@@ -4729,7 +4999,7 @@ $root.ws = (function() {
         RoomCreate.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomCreate)
                 return object;
-            var message = new $root.ws.RoomCreate();
+            let message = new $root.ws.RoomCreate();
             if (object.name != null)
                 message.name = String(object.name);
             if (object.maxSize != null)
@@ -4749,7 +5019,7 @@ $root.ws = (function() {
         RoomCreate.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.name = "";
                 object.maxSize = 0;
@@ -4796,7 +5066,7 @@ $root.ws = (function() {
          */
         function RoomCreateResp(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -4885,9 +5155,9 @@ $root.ws = (function() {
         RoomCreateResp.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomCreateResp();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomCreateResp();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.roomId = reader.string();
@@ -4956,7 +5226,7 @@ $root.ws = (function() {
         RoomCreateResp.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomCreateResp)
                 return object;
-            var message = new $root.ws.RoomCreateResp();
+            let message = new $root.ws.RoomCreateResp();
             if (object.roomId != null)
                 message.roomId = String(object.roomId);
             if (object.owner != null)
@@ -4978,7 +5248,7 @@ $root.ws = (function() {
         RoomCreateResp.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.roomId = "";
                 object.owner = "";
@@ -5026,7 +5296,7 @@ $root.ws = (function() {
          */
         function RoomJoin(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -5095,9 +5365,9 @@ $root.ws = (function() {
         RoomJoin.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomJoin();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomJoin();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.roomId = reader.string();
@@ -5154,7 +5424,7 @@ $root.ws = (function() {
         RoomJoin.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomJoin)
                 return object;
-            var message = new $root.ws.RoomJoin();
+            let message = new $root.ws.RoomJoin();
             if (object.roomId != null)
                 message.roomId = String(object.roomId);
             return message;
@@ -5172,7 +5442,7 @@ $root.ws = (function() {
         RoomJoin.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults)
                 object.roomId = "";
             if (message.roomId != null && message.hasOwnProperty("roomId"))
@@ -5219,7 +5489,7 @@ $root.ws = (function() {
         function RoomJoinResp(properties) {
             this.members = [];
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -5307,7 +5577,7 @@ $root.ws = (function() {
             if (message.max != null && Object.hasOwnProperty.call(message, "max"))
                 writer.uint32(/* id 5, wireType 0 =*/40).int32(message.max);
             if (message.members != null && message.members.length)
-                for (var i = 0; i < message.members.length; ++i)
+                for (let i = 0; i < message.members.length; ++i)
                     writer.uint32(/* id 6, wireType 2 =*/50).string(message.members[i]);
             return writer;
         };
@@ -5339,9 +5609,9 @@ $root.ws = (function() {
         RoomJoinResp.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomJoinResp();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomJoinResp();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.roomId = reader.string();
@@ -5416,7 +5686,7 @@ $root.ws = (function() {
             if (message.members != null && message.hasOwnProperty("members")) {
                 if (!Array.isArray(message.members))
                     return "members: array expected";
-                for (var i = 0; i < message.members.length; ++i)
+                for (let i = 0; i < message.members.length; ++i)
                     if (!$util.isString(message.members[i]))
                         return "members: string[] expected";
             }
@@ -5434,7 +5704,7 @@ $root.ws = (function() {
         RoomJoinResp.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomJoinResp)
                 return object;
-            var message = new $root.ws.RoomJoinResp();
+            let message = new $root.ws.RoomJoinResp();
             if (object.roomId != null)
                 message.roomId = String(object.roomId);
             if (object.name != null)
@@ -5449,7 +5719,7 @@ $root.ws = (function() {
                 if (!Array.isArray(object.members))
                     throw TypeError(".ws.RoomJoinResp.members: array expected");
                 message.members = [];
-                for (var i = 0; i < object.members.length; ++i)
+                for (let i = 0; i < object.members.length; ++i)
                     message.members[i] = String(object.members[i]);
             }
             return message;
@@ -5467,7 +5737,7 @@ $root.ws = (function() {
         RoomJoinResp.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.arrays || options.defaults)
                 object.members = [];
             if (options.defaults) {
@@ -5489,7 +5759,7 @@ $root.ws = (function() {
                 object.max = message.max;
             if (message.members && message.members.length) {
                 object.members = [];
-                for (var j = 0; j < message.members.length; ++j)
+                for (let j = 0; j < message.members.length; ++j)
                     object.members[j] = message.members[j];
             }
             return object;
@@ -5528,7 +5798,7 @@ $root.ws = (function() {
          */
         function RoomLeave(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -5597,9 +5867,9 @@ $root.ws = (function() {
         RoomLeave.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomLeave();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomLeave();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.roomId = reader.string();
@@ -5656,7 +5926,7 @@ $root.ws = (function() {
         RoomLeave.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomLeave)
                 return object;
-            var message = new $root.ws.RoomLeave();
+            let message = new $root.ws.RoomLeave();
             if (object.roomId != null)
                 message.roomId = String(object.roomId);
             return message;
@@ -5674,7 +5944,7 @@ $root.ws = (function() {
         RoomLeave.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults)
                 object.roomId = "";
             if (message.roomId != null && message.hasOwnProperty("roomId"))
@@ -5716,7 +5986,7 @@ $root.ws = (function() {
          */
         function RoomKick(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -5795,9 +6065,9 @@ $root.ws = (function() {
         RoomKick.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomKick();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomKick();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.roomId = reader.string();
@@ -5860,7 +6130,7 @@ $root.ws = (function() {
         RoomKick.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomKick)
                 return object;
-            var message = new $root.ws.RoomKick();
+            let message = new $root.ws.RoomKick();
             if (object.roomId != null)
                 message.roomId = String(object.roomId);
             if (object.targetUid != null)
@@ -5880,7 +6150,7 @@ $root.ws = (function() {
         RoomKick.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.roomId = "";
                 object.targetUid = "";
@@ -5925,7 +6195,7 @@ $root.ws = (function() {
          */
         function RoomDelete(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -5994,9 +6264,9 @@ $root.ws = (function() {
         RoomDelete.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomDelete();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomDelete();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.roomId = reader.string();
@@ -6053,7 +6323,7 @@ $root.ws = (function() {
         RoomDelete.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomDelete)
                 return object;
-            var message = new $root.ws.RoomDelete();
+            let message = new $root.ws.RoomDelete();
             if (object.roomId != null)
                 message.roomId = String(object.roomId);
             return message;
@@ -6071,7 +6341,7 @@ $root.ws = (function() {
         RoomDelete.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults)
                 object.roomId = "";
             if (message.roomId != null && message.hasOwnProperty("roomId"))
@@ -6113,7 +6383,7 @@ $root.ws = (function() {
          */
         function RoomSend(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -6192,9 +6462,9 @@ $root.ws = (function() {
         RoomSend.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomSend();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomSend();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.roomId = reader.string();
@@ -6257,7 +6527,7 @@ $root.ws = (function() {
         RoomSend.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomSend)
                 return object;
-            var message = new $root.ws.RoomSend();
+            let message = new $root.ws.RoomSend();
             if (object.roomId != null)
                 message.roomId = String(object.roomId);
             if (object.content != null)
@@ -6277,7 +6547,7 @@ $root.ws = (function() {
         RoomSend.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.roomId = "";
                 object.content = "";
@@ -6327,7 +6597,7 @@ $root.ws = (function() {
          */
         function RoomChatNew(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -6446,9 +6716,9 @@ $root.ws = (function() {
         RoomChatNew.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomChatNew();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomChatNew();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.msgId = reader.string();
@@ -6535,7 +6805,7 @@ $root.ws = (function() {
         RoomChatNew.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomChatNew)
                 return object;
-            var message = new $root.ws.RoomChatNew();
+            let message = new $root.ws.RoomChatNew();
             if (object.msgId != null)
                 message.msgId = String(object.msgId);
             if (object.roomId != null)
@@ -6570,7 +6840,7 @@ $root.ws = (function() {
         RoomChatNew.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.msgId = "";
                 object.roomId = "";
@@ -6578,7 +6848,7 @@ $root.ws = (function() {
                 object.fromName = "";
                 object.content = "";
                 if ($util.Long) {
-                    var long = new $util.Long(0, 0, false);
+                    let long = new $util.Long(0, 0, false);
                     object.timestamp = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
                 } else
                     object.timestamp = options.longs === String ? "0" : 0;
@@ -6639,7 +6909,7 @@ $root.ws = (function() {
         function RoomNotice(properties) {
             this.members = [];
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -6717,7 +6987,7 @@ $root.ws = (function() {
             if (message.username != null && Object.hasOwnProperty.call(message, "username"))
                 writer.uint32(/* id 4, wireType 2 =*/34).string(message.username);
             if (message.members != null && message.members.length)
-                for (var i = 0; i < message.members.length; ++i)
+                for (let i = 0; i < message.members.length; ++i)
                     writer.uint32(/* id 5, wireType 2 =*/42).string(message.members[i]);
             return writer;
         };
@@ -6749,9 +7019,9 @@ $root.ws = (function() {
         RoomNotice.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomNotice();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.RoomNotice();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.type = reader.string();
@@ -6820,7 +7090,7 @@ $root.ws = (function() {
             if (message.members != null && message.hasOwnProperty("members")) {
                 if (!Array.isArray(message.members))
                     return "members: array expected";
-                for (var i = 0; i < message.members.length; ++i)
+                for (let i = 0; i < message.members.length; ++i)
                     if (!$util.isString(message.members[i]))
                         return "members: string[] expected";
             }
@@ -6838,7 +7108,7 @@ $root.ws = (function() {
         RoomNotice.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.RoomNotice)
                 return object;
-            var message = new $root.ws.RoomNotice();
+            let message = new $root.ws.RoomNotice();
             if (object.type != null)
                 message.type = String(object.type);
             if (object.roomId != null)
@@ -6851,7 +7121,7 @@ $root.ws = (function() {
                 if (!Array.isArray(object.members))
                     throw TypeError(".ws.RoomNotice.members: array expected");
                 message.members = [];
-                for (var i = 0; i < object.members.length; ++i)
+                for (let i = 0; i < object.members.length; ++i)
                     message.members[i] = String(object.members[i]);
             }
             return message;
@@ -6869,7 +7139,7 @@ $root.ws = (function() {
         RoomNotice.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.arrays || options.defaults)
                 object.members = [];
             if (options.defaults) {
@@ -6888,7 +7158,7 @@ $root.ws = (function() {
                 object.username = message.username;
             if (message.members && message.members.length) {
                 object.members = [];
-                for (var j = 0; j < message.members.length; ++j)
+                for (let j = 0; j < message.members.length; ++j)
                     object.members[j] = message.members[j];
             }
             return object;
@@ -6928,7 +7198,7 @@ $root.ws = (function() {
          */
         function SystemBroadcast(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -7007,9 +7277,9 @@ $root.ws = (function() {
         SystemBroadcast.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.SystemBroadcast();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.SystemBroadcast();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.content = reader.string();
@@ -7072,7 +7342,7 @@ $root.ws = (function() {
         SystemBroadcast.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.SystemBroadcast)
                 return object;
-            var message = new $root.ws.SystemBroadcast();
+            let message = new $root.ws.SystemBroadcast();
             if (object.content != null)
                 message.content = String(object.content);
             if (object.timestamp != null)
@@ -7099,11 +7369,11 @@ $root.ws = (function() {
         SystemBroadcast.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.content = "";
                 if ($util.Long) {
-                    var long = new $util.Long(0, 0, false);
+                    let long = new $util.Long(0, 0, false);
                     object.timestamp = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
                 } else
                     object.timestamp = options.longs === String ? "0" : 0;
@@ -7152,7 +7422,7 @@ $root.ws = (function() {
          */
         function SystemPush(properties) {
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -7231,9 +7501,9 @@ $root.ws = (function() {
         SystemPush.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.SystemPush();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.SystemPush();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     message.content = reader.string();
@@ -7296,7 +7566,7 @@ $root.ws = (function() {
         SystemPush.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.SystemPush)
                 return object;
-            var message = new $root.ws.SystemPush();
+            let message = new $root.ws.SystemPush();
             if (object.content != null)
                 message.content = String(object.content);
             if (object.timestamp != null)
@@ -7323,11 +7593,11 @@ $root.ws = (function() {
         SystemPush.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.defaults) {
                 object.content = "";
                 if ($util.Long) {
-                    var long = new $util.Long(0, 0, false);
+                    let long = new $util.Long(0, 0, false);
                     object.timestamp = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
                 } else
                     object.timestamp = options.longs === String ? "0" : 0;
@@ -7356,6 +7626,1987 @@ $root.ws = (function() {
         return SystemPush;
     })();
 
+    ws.InventoryAdd = (function() {
+
+        /**
+         * Properties of an InventoryAdd.
+         * @memberof ws
+         * @interface IInventoryAdd
+         * @property {string|null} [itemId] InventoryAdd itemId
+         * @property {number|Long|null} [count] InventoryAdd count
+         */
+
+        /**
+         * Constructs a new InventoryAdd.
+         * @memberof ws
+         * @classdesc Represents an InventoryAdd.
+         * @implements IInventoryAdd
+         * @constructor
+         * @param {ws.IInventoryAdd=} [properties] Properties to set
+         */
+        function InventoryAdd(properties) {
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * InventoryAdd itemId.
+         * @member {string} itemId
+         * @memberof ws.InventoryAdd
+         * @instance
+         */
+        InventoryAdd.prototype.itemId = "";
+
+        /**
+         * InventoryAdd count.
+         * @member {number|Long} count
+         * @memberof ws.InventoryAdd
+         * @instance
+         */
+        InventoryAdd.prototype.count = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+        /**
+         * Creates a new InventoryAdd instance using the specified properties.
+         * @function create
+         * @memberof ws.InventoryAdd
+         * @static
+         * @param {ws.IInventoryAdd=} [properties] Properties to set
+         * @returns {ws.InventoryAdd} InventoryAdd instance
+         */
+        InventoryAdd.create = function create(properties) {
+            return new InventoryAdd(properties);
+        };
+
+        /**
+         * Encodes the specified InventoryAdd message. Does not implicitly {@link ws.InventoryAdd.verify|verify} messages.
+         * @function encode
+         * @memberof ws.InventoryAdd
+         * @static
+         * @param {ws.IInventoryAdd} message InventoryAdd message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryAdd.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.itemId != null && Object.hasOwnProperty.call(message, "itemId"))
+                writer.uint32(/* id 1, wireType 2 =*/10).string(message.itemId);
+            if (message.count != null && Object.hasOwnProperty.call(message, "count"))
+                writer.uint32(/* id 2, wireType 0 =*/16).int64(message.count);
+            return writer;
+        };
+
+        /**
+         * Encodes the specified InventoryAdd message, length delimited. Does not implicitly {@link ws.InventoryAdd.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.InventoryAdd
+         * @static
+         * @param {ws.IInventoryAdd} message InventoryAdd message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryAdd.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an InventoryAdd message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.InventoryAdd
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.InventoryAdd} InventoryAdd
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryAdd.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.InventoryAdd();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    message.itemId = reader.string();
+                    break;
+                case 2:
+                    message.count = reader.int64();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an InventoryAdd message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.InventoryAdd
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.InventoryAdd} InventoryAdd
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryAdd.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an InventoryAdd message.
+         * @function verify
+         * @memberof ws.InventoryAdd
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        InventoryAdd.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                if (!$util.isString(message.itemId))
+                    return "itemId: string expected";
+            if (message.count != null && message.hasOwnProperty("count"))
+                if (!$util.isInteger(message.count) && !(message.count && $util.isInteger(message.count.low) && $util.isInteger(message.count.high)))
+                    return "count: integer|Long expected";
+            return null;
+        };
+
+        /**
+         * Creates an InventoryAdd message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.InventoryAdd
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.InventoryAdd} InventoryAdd
+         */
+        InventoryAdd.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.InventoryAdd)
+                return object;
+            let message = new $root.ws.InventoryAdd();
+            if (object.itemId != null)
+                message.itemId = String(object.itemId);
+            if (object.count != null)
+                if ($util.Long)
+                    (message.count = $util.Long.fromValue(object.count)).unsigned = false;
+                else if (typeof object.count === "string")
+                    message.count = parseInt(object.count, 10);
+                else if (typeof object.count === "number")
+                    message.count = object.count;
+                else if (typeof object.count === "object")
+                    message.count = new $util.LongBits(object.count.low >>> 0, object.count.high >>> 0).toNumber();
+            return message;
+        };
+
+        /**
+         * Creates a plain object from an InventoryAdd message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.InventoryAdd
+         * @static
+         * @param {ws.InventoryAdd} message InventoryAdd
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        InventoryAdd.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.defaults) {
+                object.itemId = "";
+                if ($util.Long) {
+                    let long = new $util.Long(0, 0, false);
+                    object.count = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
+                } else
+                    object.count = options.longs === String ? "0" : 0;
+            }
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                object.itemId = message.itemId;
+            if (message.count != null && message.hasOwnProperty("count"))
+                if (typeof message.count === "number")
+                    object.count = options.longs === String ? String(message.count) : message.count;
+                else
+                    object.count = options.longs === String ? $util.Long.prototype.toString.call(message.count) : options.longs === Number ? new $util.LongBits(message.count.low >>> 0, message.count.high >>> 0).toNumber() : message.count;
+            return object;
+        };
+
+        /**
+         * Converts this InventoryAdd to JSON.
+         * @function toJSON
+         * @memberof ws.InventoryAdd
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        InventoryAdd.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return InventoryAdd;
+    })();
+
+    ws.InventoryConsume = (function() {
+
+        /**
+         * Properties of an InventoryConsume.
+         * @memberof ws
+         * @interface IInventoryConsume
+         * @property {string|null} [itemId] InventoryConsume itemId
+         * @property {number|Long|null} [count] InventoryConsume count
+         */
+
+        /**
+         * Constructs a new InventoryConsume.
+         * @memberof ws
+         * @classdesc Represents an InventoryConsume.
+         * @implements IInventoryConsume
+         * @constructor
+         * @param {ws.IInventoryConsume=} [properties] Properties to set
+         */
+        function InventoryConsume(properties) {
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * InventoryConsume itemId.
+         * @member {string} itemId
+         * @memberof ws.InventoryConsume
+         * @instance
+         */
+        InventoryConsume.prototype.itemId = "";
+
+        /**
+         * InventoryConsume count.
+         * @member {number|Long} count
+         * @memberof ws.InventoryConsume
+         * @instance
+         */
+        InventoryConsume.prototype.count = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+        /**
+         * Creates a new InventoryConsume instance using the specified properties.
+         * @function create
+         * @memberof ws.InventoryConsume
+         * @static
+         * @param {ws.IInventoryConsume=} [properties] Properties to set
+         * @returns {ws.InventoryConsume} InventoryConsume instance
+         */
+        InventoryConsume.create = function create(properties) {
+            return new InventoryConsume(properties);
+        };
+
+        /**
+         * Encodes the specified InventoryConsume message. Does not implicitly {@link ws.InventoryConsume.verify|verify} messages.
+         * @function encode
+         * @memberof ws.InventoryConsume
+         * @static
+         * @param {ws.IInventoryConsume} message InventoryConsume message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryConsume.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.itemId != null && Object.hasOwnProperty.call(message, "itemId"))
+                writer.uint32(/* id 1, wireType 2 =*/10).string(message.itemId);
+            if (message.count != null && Object.hasOwnProperty.call(message, "count"))
+                writer.uint32(/* id 2, wireType 0 =*/16).int64(message.count);
+            return writer;
+        };
+
+        /**
+         * Encodes the specified InventoryConsume message, length delimited. Does not implicitly {@link ws.InventoryConsume.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.InventoryConsume
+         * @static
+         * @param {ws.IInventoryConsume} message InventoryConsume message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryConsume.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an InventoryConsume message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.InventoryConsume
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.InventoryConsume} InventoryConsume
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryConsume.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.InventoryConsume();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    message.itemId = reader.string();
+                    break;
+                case 2:
+                    message.count = reader.int64();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an InventoryConsume message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.InventoryConsume
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.InventoryConsume} InventoryConsume
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryConsume.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an InventoryConsume message.
+         * @function verify
+         * @memberof ws.InventoryConsume
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        InventoryConsume.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                if (!$util.isString(message.itemId))
+                    return "itemId: string expected";
+            if (message.count != null && message.hasOwnProperty("count"))
+                if (!$util.isInteger(message.count) && !(message.count && $util.isInteger(message.count.low) && $util.isInteger(message.count.high)))
+                    return "count: integer|Long expected";
+            return null;
+        };
+
+        /**
+         * Creates an InventoryConsume message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.InventoryConsume
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.InventoryConsume} InventoryConsume
+         */
+        InventoryConsume.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.InventoryConsume)
+                return object;
+            let message = new $root.ws.InventoryConsume();
+            if (object.itemId != null)
+                message.itemId = String(object.itemId);
+            if (object.count != null)
+                if ($util.Long)
+                    (message.count = $util.Long.fromValue(object.count)).unsigned = false;
+                else if (typeof object.count === "string")
+                    message.count = parseInt(object.count, 10);
+                else if (typeof object.count === "number")
+                    message.count = object.count;
+                else if (typeof object.count === "object")
+                    message.count = new $util.LongBits(object.count.low >>> 0, object.count.high >>> 0).toNumber();
+            return message;
+        };
+
+        /**
+         * Creates a plain object from an InventoryConsume message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.InventoryConsume
+         * @static
+         * @param {ws.InventoryConsume} message InventoryConsume
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        InventoryConsume.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.defaults) {
+                object.itemId = "";
+                if ($util.Long) {
+                    let long = new $util.Long(0, 0, false);
+                    object.count = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
+                } else
+                    object.count = options.longs === String ? "0" : 0;
+            }
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                object.itemId = message.itemId;
+            if (message.count != null && message.hasOwnProperty("count"))
+                if (typeof message.count === "number")
+                    object.count = options.longs === String ? String(message.count) : message.count;
+                else
+                    object.count = options.longs === String ? $util.Long.prototype.toString.call(message.count) : options.longs === Number ? new $util.LongBits(message.count.low >>> 0, message.count.high >>> 0).toNumber() : message.count;
+            return object;
+        };
+
+        /**
+         * Converts this InventoryConsume to JSON.
+         * @function toJSON
+         * @memberof ws.InventoryConsume
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        InventoryConsume.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return InventoryConsume;
+    })();
+
+    ws.InventoryDrop = (function() {
+
+        /**
+         * Properties of an InventoryDrop.
+         * @memberof ws
+         * @interface IInventoryDrop
+         * @property {string|null} [itemId] InventoryDrop itemId
+         * @property {number|Long|null} [count] InventoryDrop count
+         */
+
+        /**
+         * Constructs a new InventoryDrop.
+         * @memberof ws
+         * @classdesc Represents an InventoryDrop.
+         * @implements IInventoryDrop
+         * @constructor
+         * @param {ws.IInventoryDrop=} [properties] Properties to set
+         */
+        function InventoryDrop(properties) {
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * InventoryDrop itemId.
+         * @member {string} itemId
+         * @memberof ws.InventoryDrop
+         * @instance
+         */
+        InventoryDrop.prototype.itemId = "";
+
+        /**
+         * InventoryDrop count.
+         * @member {number|Long} count
+         * @memberof ws.InventoryDrop
+         * @instance
+         */
+        InventoryDrop.prototype.count = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+        /**
+         * Creates a new InventoryDrop instance using the specified properties.
+         * @function create
+         * @memberof ws.InventoryDrop
+         * @static
+         * @param {ws.IInventoryDrop=} [properties] Properties to set
+         * @returns {ws.InventoryDrop} InventoryDrop instance
+         */
+        InventoryDrop.create = function create(properties) {
+            return new InventoryDrop(properties);
+        };
+
+        /**
+         * Encodes the specified InventoryDrop message. Does not implicitly {@link ws.InventoryDrop.verify|verify} messages.
+         * @function encode
+         * @memberof ws.InventoryDrop
+         * @static
+         * @param {ws.IInventoryDrop} message InventoryDrop message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryDrop.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.itemId != null && Object.hasOwnProperty.call(message, "itemId"))
+                writer.uint32(/* id 1, wireType 2 =*/10).string(message.itemId);
+            if (message.count != null && Object.hasOwnProperty.call(message, "count"))
+                writer.uint32(/* id 2, wireType 0 =*/16).int64(message.count);
+            return writer;
+        };
+
+        /**
+         * Encodes the specified InventoryDrop message, length delimited. Does not implicitly {@link ws.InventoryDrop.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.InventoryDrop
+         * @static
+         * @param {ws.IInventoryDrop} message InventoryDrop message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryDrop.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an InventoryDrop message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.InventoryDrop
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.InventoryDrop} InventoryDrop
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryDrop.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.InventoryDrop();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    message.itemId = reader.string();
+                    break;
+                case 2:
+                    message.count = reader.int64();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an InventoryDrop message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.InventoryDrop
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.InventoryDrop} InventoryDrop
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryDrop.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an InventoryDrop message.
+         * @function verify
+         * @memberof ws.InventoryDrop
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        InventoryDrop.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                if (!$util.isString(message.itemId))
+                    return "itemId: string expected";
+            if (message.count != null && message.hasOwnProperty("count"))
+                if (!$util.isInteger(message.count) && !(message.count && $util.isInteger(message.count.low) && $util.isInteger(message.count.high)))
+                    return "count: integer|Long expected";
+            return null;
+        };
+
+        /**
+         * Creates an InventoryDrop message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.InventoryDrop
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.InventoryDrop} InventoryDrop
+         */
+        InventoryDrop.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.InventoryDrop)
+                return object;
+            let message = new $root.ws.InventoryDrop();
+            if (object.itemId != null)
+                message.itemId = String(object.itemId);
+            if (object.count != null)
+                if ($util.Long)
+                    (message.count = $util.Long.fromValue(object.count)).unsigned = false;
+                else if (typeof object.count === "string")
+                    message.count = parseInt(object.count, 10);
+                else if (typeof object.count === "number")
+                    message.count = object.count;
+                else if (typeof object.count === "object")
+                    message.count = new $util.LongBits(object.count.low >>> 0, object.count.high >>> 0).toNumber();
+            return message;
+        };
+
+        /**
+         * Creates a plain object from an InventoryDrop message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.InventoryDrop
+         * @static
+         * @param {ws.InventoryDrop} message InventoryDrop
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        InventoryDrop.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.defaults) {
+                object.itemId = "";
+                if ($util.Long) {
+                    let long = new $util.Long(0, 0, false);
+                    object.count = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
+                } else
+                    object.count = options.longs === String ? "0" : 0;
+            }
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                object.itemId = message.itemId;
+            if (message.count != null && message.hasOwnProperty("count"))
+                if (typeof message.count === "number")
+                    object.count = options.longs === String ? String(message.count) : message.count;
+                else
+                    object.count = options.longs === String ? $util.Long.prototype.toString.call(message.count) : options.longs === Number ? new $util.LongBits(message.count.low >>> 0, message.count.high >>> 0).toNumber() : message.count;
+            return object;
+        };
+
+        /**
+         * Converts this InventoryDrop to JSON.
+         * @function toJSON
+         * @memberof ws.InventoryDrop
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        InventoryDrop.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return InventoryDrop;
+    })();
+
+    ws.InventoryGet = (function() {
+
+        /**
+         * Properties of an InventoryGet.
+         * @memberof ws
+         * @interface IInventoryGet
+         */
+
+        /**
+         * Constructs a new InventoryGet.
+         * @memberof ws
+         * @classdesc Represents an InventoryGet.
+         * @implements IInventoryGet
+         * @constructor
+         * @param {ws.IInventoryGet=} [properties] Properties to set
+         */
+        function InventoryGet(properties) {
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * Creates a new InventoryGet instance using the specified properties.
+         * @function create
+         * @memberof ws.InventoryGet
+         * @static
+         * @param {ws.IInventoryGet=} [properties] Properties to set
+         * @returns {ws.InventoryGet} InventoryGet instance
+         */
+        InventoryGet.create = function create(properties) {
+            return new InventoryGet(properties);
+        };
+
+        /**
+         * Encodes the specified InventoryGet message. Does not implicitly {@link ws.InventoryGet.verify|verify} messages.
+         * @function encode
+         * @memberof ws.InventoryGet
+         * @static
+         * @param {ws.IInventoryGet} message InventoryGet message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryGet.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            return writer;
+        };
+
+        /**
+         * Encodes the specified InventoryGet message, length delimited. Does not implicitly {@link ws.InventoryGet.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.InventoryGet
+         * @static
+         * @param {ws.IInventoryGet} message InventoryGet message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryGet.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an InventoryGet message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.InventoryGet
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.InventoryGet} InventoryGet
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryGet.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.InventoryGet();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an InventoryGet message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.InventoryGet
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.InventoryGet} InventoryGet
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryGet.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an InventoryGet message.
+         * @function verify
+         * @memberof ws.InventoryGet
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        InventoryGet.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            return null;
+        };
+
+        /**
+         * Creates an InventoryGet message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.InventoryGet
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.InventoryGet} InventoryGet
+         */
+        InventoryGet.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.InventoryGet)
+                return object;
+            return new $root.ws.InventoryGet();
+        };
+
+        /**
+         * Creates a plain object from an InventoryGet message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.InventoryGet
+         * @static
+         * @param {ws.InventoryGet} message InventoryGet
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        InventoryGet.toObject = function toObject() {
+            return {};
+        };
+
+        /**
+         * Converts this InventoryGet to JSON.
+         * @function toJSON
+         * @memberof ws.InventoryGet
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        InventoryGet.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return InventoryGet;
+    })();
+
+    ws.InventoryAddResp = (function() {
+
+        /**
+         * Properties of an InventoryAddResp.
+         * @memberof ws
+         * @interface IInventoryAddResp
+         * @property {string|null} [itemId] InventoryAddResp itemId
+         * @property {number|Long|null} [newCount] InventoryAddResp newCount
+         */
+
+        /**
+         * Constructs a new InventoryAddResp.
+         * @memberof ws
+         * @classdesc Represents an InventoryAddResp.
+         * @implements IInventoryAddResp
+         * @constructor
+         * @param {ws.IInventoryAddResp=} [properties] Properties to set
+         */
+        function InventoryAddResp(properties) {
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * InventoryAddResp itemId.
+         * @member {string} itemId
+         * @memberof ws.InventoryAddResp
+         * @instance
+         */
+        InventoryAddResp.prototype.itemId = "";
+
+        /**
+         * InventoryAddResp newCount.
+         * @member {number|Long} newCount
+         * @memberof ws.InventoryAddResp
+         * @instance
+         */
+        InventoryAddResp.prototype.newCount = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+        /**
+         * Creates a new InventoryAddResp instance using the specified properties.
+         * @function create
+         * @memberof ws.InventoryAddResp
+         * @static
+         * @param {ws.IInventoryAddResp=} [properties] Properties to set
+         * @returns {ws.InventoryAddResp} InventoryAddResp instance
+         */
+        InventoryAddResp.create = function create(properties) {
+            return new InventoryAddResp(properties);
+        };
+
+        /**
+         * Encodes the specified InventoryAddResp message. Does not implicitly {@link ws.InventoryAddResp.verify|verify} messages.
+         * @function encode
+         * @memberof ws.InventoryAddResp
+         * @static
+         * @param {ws.IInventoryAddResp} message InventoryAddResp message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryAddResp.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.itemId != null && Object.hasOwnProperty.call(message, "itemId"))
+                writer.uint32(/* id 1, wireType 2 =*/10).string(message.itemId);
+            if (message.newCount != null && Object.hasOwnProperty.call(message, "newCount"))
+                writer.uint32(/* id 2, wireType 0 =*/16).int64(message.newCount);
+            return writer;
+        };
+
+        /**
+         * Encodes the specified InventoryAddResp message, length delimited. Does not implicitly {@link ws.InventoryAddResp.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.InventoryAddResp
+         * @static
+         * @param {ws.IInventoryAddResp} message InventoryAddResp message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryAddResp.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an InventoryAddResp message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.InventoryAddResp
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.InventoryAddResp} InventoryAddResp
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryAddResp.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.InventoryAddResp();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    message.itemId = reader.string();
+                    break;
+                case 2:
+                    message.newCount = reader.int64();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an InventoryAddResp message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.InventoryAddResp
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.InventoryAddResp} InventoryAddResp
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryAddResp.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an InventoryAddResp message.
+         * @function verify
+         * @memberof ws.InventoryAddResp
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        InventoryAddResp.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                if (!$util.isString(message.itemId))
+                    return "itemId: string expected";
+            if (message.newCount != null && message.hasOwnProperty("newCount"))
+                if (!$util.isInteger(message.newCount) && !(message.newCount && $util.isInteger(message.newCount.low) && $util.isInteger(message.newCount.high)))
+                    return "newCount: integer|Long expected";
+            return null;
+        };
+
+        /**
+         * Creates an InventoryAddResp message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.InventoryAddResp
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.InventoryAddResp} InventoryAddResp
+         */
+        InventoryAddResp.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.InventoryAddResp)
+                return object;
+            let message = new $root.ws.InventoryAddResp();
+            if (object.itemId != null)
+                message.itemId = String(object.itemId);
+            if (object.newCount != null)
+                if ($util.Long)
+                    (message.newCount = $util.Long.fromValue(object.newCount)).unsigned = false;
+                else if (typeof object.newCount === "string")
+                    message.newCount = parseInt(object.newCount, 10);
+                else if (typeof object.newCount === "number")
+                    message.newCount = object.newCount;
+                else if (typeof object.newCount === "object")
+                    message.newCount = new $util.LongBits(object.newCount.low >>> 0, object.newCount.high >>> 0).toNumber();
+            return message;
+        };
+
+        /**
+         * Creates a plain object from an InventoryAddResp message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.InventoryAddResp
+         * @static
+         * @param {ws.InventoryAddResp} message InventoryAddResp
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        InventoryAddResp.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.defaults) {
+                object.itemId = "";
+                if ($util.Long) {
+                    let long = new $util.Long(0, 0, false);
+                    object.newCount = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
+                } else
+                    object.newCount = options.longs === String ? "0" : 0;
+            }
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                object.itemId = message.itemId;
+            if (message.newCount != null && message.hasOwnProperty("newCount"))
+                if (typeof message.newCount === "number")
+                    object.newCount = options.longs === String ? String(message.newCount) : message.newCount;
+                else
+                    object.newCount = options.longs === String ? $util.Long.prototype.toString.call(message.newCount) : options.longs === Number ? new $util.LongBits(message.newCount.low >>> 0, message.newCount.high >>> 0).toNumber() : message.newCount;
+            return object;
+        };
+
+        /**
+         * Converts this InventoryAddResp to JSON.
+         * @function toJSON
+         * @memberof ws.InventoryAddResp
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        InventoryAddResp.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return InventoryAddResp;
+    })();
+
+    ws.InventoryConsumeResp = (function() {
+
+        /**
+         * Properties of an InventoryConsumeResp.
+         * @memberof ws
+         * @interface IInventoryConsumeResp
+         * @property {string|null} [itemId] InventoryConsumeResp itemId
+         * @property {number|Long|null} [newCount] InventoryConsumeResp newCount
+         */
+
+        /**
+         * Constructs a new InventoryConsumeResp.
+         * @memberof ws
+         * @classdesc Represents an InventoryConsumeResp.
+         * @implements IInventoryConsumeResp
+         * @constructor
+         * @param {ws.IInventoryConsumeResp=} [properties] Properties to set
+         */
+        function InventoryConsumeResp(properties) {
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * InventoryConsumeResp itemId.
+         * @member {string} itemId
+         * @memberof ws.InventoryConsumeResp
+         * @instance
+         */
+        InventoryConsumeResp.prototype.itemId = "";
+
+        /**
+         * InventoryConsumeResp newCount.
+         * @member {number|Long} newCount
+         * @memberof ws.InventoryConsumeResp
+         * @instance
+         */
+        InventoryConsumeResp.prototype.newCount = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+        /**
+         * Creates a new InventoryConsumeResp instance using the specified properties.
+         * @function create
+         * @memberof ws.InventoryConsumeResp
+         * @static
+         * @param {ws.IInventoryConsumeResp=} [properties] Properties to set
+         * @returns {ws.InventoryConsumeResp} InventoryConsumeResp instance
+         */
+        InventoryConsumeResp.create = function create(properties) {
+            return new InventoryConsumeResp(properties);
+        };
+
+        /**
+         * Encodes the specified InventoryConsumeResp message. Does not implicitly {@link ws.InventoryConsumeResp.verify|verify} messages.
+         * @function encode
+         * @memberof ws.InventoryConsumeResp
+         * @static
+         * @param {ws.IInventoryConsumeResp} message InventoryConsumeResp message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryConsumeResp.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.itemId != null && Object.hasOwnProperty.call(message, "itemId"))
+                writer.uint32(/* id 1, wireType 2 =*/10).string(message.itemId);
+            if (message.newCount != null && Object.hasOwnProperty.call(message, "newCount"))
+                writer.uint32(/* id 2, wireType 0 =*/16).int64(message.newCount);
+            return writer;
+        };
+
+        /**
+         * Encodes the specified InventoryConsumeResp message, length delimited. Does not implicitly {@link ws.InventoryConsumeResp.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.InventoryConsumeResp
+         * @static
+         * @param {ws.IInventoryConsumeResp} message InventoryConsumeResp message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryConsumeResp.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an InventoryConsumeResp message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.InventoryConsumeResp
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.InventoryConsumeResp} InventoryConsumeResp
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryConsumeResp.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.InventoryConsumeResp();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    message.itemId = reader.string();
+                    break;
+                case 2:
+                    message.newCount = reader.int64();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an InventoryConsumeResp message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.InventoryConsumeResp
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.InventoryConsumeResp} InventoryConsumeResp
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryConsumeResp.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an InventoryConsumeResp message.
+         * @function verify
+         * @memberof ws.InventoryConsumeResp
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        InventoryConsumeResp.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                if (!$util.isString(message.itemId))
+                    return "itemId: string expected";
+            if (message.newCount != null && message.hasOwnProperty("newCount"))
+                if (!$util.isInteger(message.newCount) && !(message.newCount && $util.isInteger(message.newCount.low) && $util.isInteger(message.newCount.high)))
+                    return "newCount: integer|Long expected";
+            return null;
+        };
+
+        /**
+         * Creates an InventoryConsumeResp message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.InventoryConsumeResp
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.InventoryConsumeResp} InventoryConsumeResp
+         */
+        InventoryConsumeResp.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.InventoryConsumeResp)
+                return object;
+            let message = new $root.ws.InventoryConsumeResp();
+            if (object.itemId != null)
+                message.itemId = String(object.itemId);
+            if (object.newCount != null)
+                if ($util.Long)
+                    (message.newCount = $util.Long.fromValue(object.newCount)).unsigned = false;
+                else if (typeof object.newCount === "string")
+                    message.newCount = parseInt(object.newCount, 10);
+                else if (typeof object.newCount === "number")
+                    message.newCount = object.newCount;
+                else if (typeof object.newCount === "object")
+                    message.newCount = new $util.LongBits(object.newCount.low >>> 0, object.newCount.high >>> 0).toNumber();
+            return message;
+        };
+
+        /**
+         * Creates a plain object from an InventoryConsumeResp message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.InventoryConsumeResp
+         * @static
+         * @param {ws.InventoryConsumeResp} message InventoryConsumeResp
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        InventoryConsumeResp.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.defaults) {
+                object.itemId = "";
+                if ($util.Long) {
+                    let long = new $util.Long(0, 0, false);
+                    object.newCount = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
+                } else
+                    object.newCount = options.longs === String ? "0" : 0;
+            }
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                object.itemId = message.itemId;
+            if (message.newCount != null && message.hasOwnProperty("newCount"))
+                if (typeof message.newCount === "number")
+                    object.newCount = options.longs === String ? String(message.newCount) : message.newCount;
+                else
+                    object.newCount = options.longs === String ? $util.Long.prototype.toString.call(message.newCount) : options.longs === Number ? new $util.LongBits(message.newCount.low >>> 0, message.newCount.high >>> 0).toNumber() : message.newCount;
+            return object;
+        };
+
+        /**
+         * Converts this InventoryConsumeResp to JSON.
+         * @function toJSON
+         * @memberof ws.InventoryConsumeResp
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        InventoryConsumeResp.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return InventoryConsumeResp;
+    })();
+
+    ws.InventoryDropResp = (function() {
+
+        /**
+         * Properties of an InventoryDropResp.
+         * @memberof ws
+         * @interface IInventoryDropResp
+         * @property {string|null} [itemId] InventoryDropResp itemId
+         * @property {number|Long|null} [newCount] InventoryDropResp newCount
+         */
+
+        /**
+         * Constructs a new InventoryDropResp.
+         * @memberof ws
+         * @classdesc Represents an InventoryDropResp.
+         * @implements IInventoryDropResp
+         * @constructor
+         * @param {ws.IInventoryDropResp=} [properties] Properties to set
+         */
+        function InventoryDropResp(properties) {
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * InventoryDropResp itemId.
+         * @member {string} itemId
+         * @memberof ws.InventoryDropResp
+         * @instance
+         */
+        InventoryDropResp.prototype.itemId = "";
+
+        /**
+         * InventoryDropResp newCount.
+         * @member {number|Long} newCount
+         * @memberof ws.InventoryDropResp
+         * @instance
+         */
+        InventoryDropResp.prototype.newCount = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+        /**
+         * Creates a new InventoryDropResp instance using the specified properties.
+         * @function create
+         * @memberof ws.InventoryDropResp
+         * @static
+         * @param {ws.IInventoryDropResp=} [properties] Properties to set
+         * @returns {ws.InventoryDropResp} InventoryDropResp instance
+         */
+        InventoryDropResp.create = function create(properties) {
+            return new InventoryDropResp(properties);
+        };
+
+        /**
+         * Encodes the specified InventoryDropResp message. Does not implicitly {@link ws.InventoryDropResp.verify|verify} messages.
+         * @function encode
+         * @memberof ws.InventoryDropResp
+         * @static
+         * @param {ws.IInventoryDropResp} message InventoryDropResp message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryDropResp.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.itemId != null && Object.hasOwnProperty.call(message, "itemId"))
+                writer.uint32(/* id 1, wireType 2 =*/10).string(message.itemId);
+            if (message.newCount != null && Object.hasOwnProperty.call(message, "newCount"))
+                writer.uint32(/* id 2, wireType 0 =*/16).int64(message.newCount);
+            return writer;
+        };
+
+        /**
+         * Encodes the specified InventoryDropResp message, length delimited. Does not implicitly {@link ws.InventoryDropResp.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.InventoryDropResp
+         * @static
+         * @param {ws.IInventoryDropResp} message InventoryDropResp message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryDropResp.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an InventoryDropResp message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.InventoryDropResp
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.InventoryDropResp} InventoryDropResp
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryDropResp.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.InventoryDropResp();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    message.itemId = reader.string();
+                    break;
+                case 2:
+                    message.newCount = reader.int64();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an InventoryDropResp message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.InventoryDropResp
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.InventoryDropResp} InventoryDropResp
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryDropResp.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an InventoryDropResp message.
+         * @function verify
+         * @memberof ws.InventoryDropResp
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        InventoryDropResp.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                if (!$util.isString(message.itemId))
+                    return "itemId: string expected";
+            if (message.newCount != null && message.hasOwnProperty("newCount"))
+                if (!$util.isInteger(message.newCount) && !(message.newCount && $util.isInteger(message.newCount.low) && $util.isInteger(message.newCount.high)))
+                    return "newCount: integer|Long expected";
+            return null;
+        };
+
+        /**
+         * Creates an InventoryDropResp message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.InventoryDropResp
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.InventoryDropResp} InventoryDropResp
+         */
+        InventoryDropResp.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.InventoryDropResp)
+                return object;
+            let message = new $root.ws.InventoryDropResp();
+            if (object.itemId != null)
+                message.itemId = String(object.itemId);
+            if (object.newCount != null)
+                if ($util.Long)
+                    (message.newCount = $util.Long.fromValue(object.newCount)).unsigned = false;
+                else if (typeof object.newCount === "string")
+                    message.newCount = parseInt(object.newCount, 10);
+                else if (typeof object.newCount === "number")
+                    message.newCount = object.newCount;
+                else if (typeof object.newCount === "object")
+                    message.newCount = new $util.LongBits(object.newCount.low >>> 0, object.newCount.high >>> 0).toNumber();
+            return message;
+        };
+
+        /**
+         * Creates a plain object from an InventoryDropResp message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.InventoryDropResp
+         * @static
+         * @param {ws.InventoryDropResp} message InventoryDropResp
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        InventoryDropResp.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.defaults) {
+                object.itemId = "";
+                if ($util.Long) {
+                    let long = new $util.Long(0, 0, false);
+                    object.newCount = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
+                } else
+                    object.newCount = options.longs === String ? "0" : 0;
+            }
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                object.itemId = message.itemId;
+            if (message.newCount != null && message.hasOwnProperty("newCount"))
+                if (typeof message.newCount === "number")
+                    object.newCount = options.longs === String ? String(message.newCount) : message.newCount;
+                else
+                    object.newCount = options.longs === String ? $util.Long.prototype.toString.call(message.newCount) : options.longs === Number ? new $util.LongBits(message.newCount.low >>> 0, message.newCount.high >>> 0).toNumber() : message.newCount;
+            return object;
+        };
+
+        /**
+         * Converts this InventoryDropResp to JSON.
+         * @function toJSON
+         * @memberof ws.InventoryDropResp
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        InventoryDropResp.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return InventoryDropResp;
+    })();
+
+    ws.InventoryGetResp = (function() {
+
+        /**
+         * Properties of an InventoryGetResp.
+         * @memberof ws
+         * @interface IInventoryGetResp
+         * @property {Array.<ws.IItemEntry>|null} [items] InventoryGetResp items
+         * @property {number|null} [total] InventoryGetResp total
+         */
+
+        /**
+         * Constructs a new InventoryGetResp.
+         * @memberof ws
+         * @classdesc Represents an InventoryGetResp.
+         * @implements IInventoryGetResp
+         * @constructor
+         * @param {ws.IInventoryGetResp=} [properties] Properties to set
+         */
+        function InventoryGetResp(properties) {
+            this.items = [];
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * InventoryGetResp items.
+         * @member {Array.<ws.IItemEntry>} items
+         * @memberof ws.InventoryGetResp
+         * @instance
+         */
+        InventoryGetResp.prototype.items = $util.emptyArray;
+
+        /**
+         * InventoryGetResp total.
+         * @member {number} total
+         * @memberof ws.InventoryGetResp
+         * @instance
+         */
+        InventoryGetResp.prototype.total = 0;
+
+        /**
+         * Creates a new InventoryGetResp instance using the specified properties.
+         * @function create
+         * @memberof ws.InventoryGetResp
+         * @static
+         * @param {ws.IInventoryGetResp=} [properties] Properties to set
+         * @returns {ws.InventoryGetResp} InventoryGetResp instance
+         */
+        InventoryGetResp.create = function create(properties) {
+            return new InventoryGetResp(properties);
+        };
+
+        /**
+         * Encodes the specified InventoryGetResp message. Does not implicitly {@link ws.InventoryGetResp.verify|verify} messages.
+         * @function encode
+         * @memberof ws.InventoryGetResp
+         * @static
+         * @param {ws.IInventoryGetResp} message InventoryGetResp message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryGetResp.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.items != null && message.items.length)
+                for (let i = 0; i < message.items.length; ++i)
+                    $root.ws.ItemEntry.encode(message.items[i], writer.uint32(/* id 1, wireType 2 =*/10).fork()).ldelim();
+            if (message.total != null && Object.hasOwnProperty.call(message, "total"))
+                writer.uint32(/* id 2, wireType 0 =*/16).int32(message.total);
+            return writer;
+        };
+
+        /**
+         * Encodes the specified InventoryGetResp message, length delimited. Does not implicitly {@link ws.InventoryGetResp.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.InventoryGetResp
+         * @static
+         * @param {ws.IInventoryGetResp} message InventoryGetResp message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        InventoryGetResp.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an InventoryGetResp message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.InventoryGetResp
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.InventoryGetResp} InventoryGetResp
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryGetResp.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.InventoryGetResp();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    if (!(message.items && message.items.length))
+                        message.items = [];
+                    message.items.push($root.ws.ItemEntry.decode(reader, reader.uint32()));
+                    break;
+                case 2:
+                    message.total = reader.int32();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an InventoryGetResp message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.InventoryGetResp
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.InventoryGetResp} InventoryGetResp
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        InventoryGetResp.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an InventoryGetResp message.
+         * @function verify
+         * @memberof ws.InventoryGetResp
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        InventoryGetResp.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.items != null && message.hasOwnProperty("items")) {
+                if (!Array.isArray(message.items))
+                    return "items: array expected";
+                for (let i = 0; i < message.items.length; ++i) {
+                    let error = $root.ws.ItemEntry.verify(message.items[i]);
+                    if (error)
+                        return "items." + error;
+                }
+            }
+            if (message.total != null && message.hasOwnProperty("total"))
+                if (!$util.isInteger(message.total))
+                    return "total: integer expected";
+            return null;
+        };
+
+        /**
+         * Creates an InventoryGetResp message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.InventoryGetResp
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.InventoryGetResp} InventoryGetResp
+         */
+        InventoryGetResp.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.InventoryGetResp)
+                return object;
+            let message = new $root.ws.InventoryGetResp();
+            if (object.items) {
+                if (!Array.isArray(object.items))
+                    throw TypeError(".ws.InventoryGetResp.items: array expected");
+                message.items = [];
+                for (let i = 0; i < object.items.length; ++i) {
+                    if (typeof object.items[i] !== "object")
+                        throw TypeError(".ws.InventoryGetResp.items: object expected");
+                    message.items[i] = $root.ws.ItemEntry.fromObject(object.items[i]);
+                }
+            }
+            if (object.total != null)
+                message.total = object.total | 0;
+            return message;
+        };
+
+        /**
+         * Creates a plain object from an InventoryGetResp message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.InventoryGetResp
+         * @static
+         * @param {ws.InventoryGetResp} message InventoryGetResp
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        InventoryGetResp.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.arrays || options.defaults)
+                object.items = [];
+            if (options.defaults)
+                object.total = 0;
+            if (message.items && message.items.length) {
+                object.items = [];
+                for (let j = 0; j < message.items.length; ++j)
+                    object.items[j] = $root.ws.ItemEntry.toObject(message.items[j], options);
+            }
+            if (message.total != null && message.hasOwnProperty("total"))
+                object.total = message.total;
+            return object;
+        };
+
+        /**
+         * Converts this InventoryGetResp to JSON.
+         * @function toJSON
+         * @memberof ws.InventoryGetResp
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        InventoryGetResp.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return InventoryGetResp;
+    })();
+
+    ws.ItemEntry = (function() {
+
+        /**
+         * Properties of an ItemEntry.
+         * @memberof ws
+         * @interface IItemEntry
+         * @property {string|null} [itemId] ItemEntry itemId
+         * @property {number|Long|null} [count] ItemEntry count
+         * @property {string|null} [name] ItemEntry name
+         */
+
+        /**
+         * Constructs a new ItemEntry.
+         * @memberof ws
+         * @classdesc Represents an ItemEntry.
+         * @implements IItemEntry
+         * @constructor
+         * @param {ws.IItemEntry=} [properties] Properties to set
+         */
+        function ItemEntry(properties) {
+            if (properties)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * ItemEntry itemId.
+         * @member {string} itemId
+         * @memberof ws.ItemEntry
+         * @instance
+         */
+        ItemEntry.prototype.itemId = "";
+
+        /**
+         * ItemEntry count.
+         * @member {number|Long} count
+         * @memberof ws.ItemEntry
+         * @instance
+         */
+        ItemEntry.prototype.count = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+        /**
+         * ItemEntry name.
+         * @member {string} name
+         * @memberof ws.ItemEntry
+         * @instance
+         */
+        ItemEntry.prototype.name = "";
+
+        /**
+         * Creates a new ItemEntry instance using the specified properties.
+         * @function create
+         * @memberof ws.ItemEntry
+         * @static
+         * @param {ws.IItemEntry=} [properties] Properties to set
+         * @returns {ws.ItemEntry} ItemEntry instance
+         */
+        ItemEntry.create = function create(properties) {
+            return new ItemEntry(properties);
+        };
+
+        /**
+         * Encodes the specified ItemEntry message. Does not implicitly {@link ws.ItemEntry.verify|verify} messages.
+         * @function encode
+         * @memberof ws.ItemEntry
+         * @static
+         * @param {ws.IItemEntry} message ItemEntry message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        ItemEntry.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.itemId != null && Object.hasOwnProperty.call(message, "itemId"))
+                writer.uint32(/* id 1, wireType 2 =*/10).string(message.itemId);
+            if (message.count != null && Object.hasOwnProperty.call(message, "count"))
+                writer.uint32(/* id 2, wireType 0 =*/16).int64(message.count);
+            if (message.name != null && Object.hasOwnProperty.call(message, "name"))
+                writer.uint32(/* id 3, wireType 2 =*/26).string(message.name);
+            return writer;
+        };
+
+        /**
+         * Encodes the specified ItemEntry message, length delimited. Does not implicitly {@link ws.ItemEntry.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof ws.ItemEntry
+         * @static
+         * @param {ws.IItemEntry} message ItemEntry message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        ItemEntry.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        /**
+         * Decodes an ItemEntry message from the specified reader or buffer.
+         * @function decode
+         * @memberof ws.ItemEntry
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {ws.ItemEntry} ItemEntry
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        ItemEntry.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.ItemEntry();
+            while (reader.pos < end) {
+                let tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    message.itemId = reader.string();
+                    break;
+                case 2:
+                    message.count = reader.int64();
+                    break;
+                case 3:
+                    message.name = reader.string();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes an ItemEntry message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof ws.ItemEntry
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {ws.ItemEntry} ItemEntry
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        ItemEntry.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies an ItemEntry message.
+         * @function verify
+         * @memberof ws.ItemEntry
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        ItemEntry.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                if (!$util.isString(message.itemId))
+                    return "itemId: string expected";
+            if (message.count != null && message.hasOwnProperty("count"))
+                if (!$util.isInteger(message.count) && !(message.count && $util.isInteger(message.count.low) && $util.isInteger(message.count.high)))
+                    return "count: integer|Long expected";
+            if (message.name != null && message.hasOwnProperty("name"))
+                if (!$util.isString(message.name))
+                    return "name: string expected";
+            return null;
+        };
+
+        /**
+         * Creates an ItemEntry message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof ws.ItemEntry
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {ws.ItemEntry} ItemEntry
+         */
+        ItemEntry.fromObject = function fromObject(object) {
+            if (object instanceof $root.ws.ItemEntry)
+                return object;
+            let message = new $root.ws.ItemEntry();
+            if (object.itemId != null)
+                message.itemId = String(object.itemId);
+            if (object.count != null)
+                if ($util.Long)
+                    (message.count = $util.Long.fromValue(object.count)).unsigned = false;
+                else if (typeof object.count === "string")
+                    message.count = parseInt(object.count, 10);
+                else if (typeof object.count === "number")
+                    message.count = object.count;
+                else if (typeof object.count === "object")
+                    message.count = new $util.LongBits(object.count.low >>> 0, object.count.high >>> 0).toNumber();
+            if (object.name != null)
+                message.name = String(object.name);
+            return message;
+        };
+
+        /**
+         * Creates a plain object from an ItemEntry message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof ws.ItemEntry
+         * @static
+         * @param {ws.ItemEntry} message ItemEntry
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        ItemEntry.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.defaults) {
+                object.itemId = "";
+                if ($util.Long) {
+                    let long = new $util.Long(0, 0, false);
+                    object.count = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
+                } else
+                    object.count = options.longs === String ? "0" : 0;
+                object.name = "";
+            }
+            if (message.itemId != null && message.hasOwnProperty("itemId"))
+                object.itemId = message.itemId;
+            if (message.count != null && message.hasOwnProperty("count"))
+                if (typeof message.count === "number")
+                    object.count = options.longs === String ? String(message.count) : message.count;
+                else
+                    object.count = options.longs === String ? $util.Long.prototype.toString.call(message.count) : options.longs === Number ? new $util.LongBits(message.count.low >>> 0, message.count.high >>> 0).toNumber() : message.count;
+            if (message.name != null && message.hasOwnProperty("name"))
+                object.name = message.name;
+            return object;
+        };
+
+        /**
+         * Converts this ItemEntry to JSON.
+         * @function toJSON
+         * @memberof ws.ItemEntry
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        ItemEntry.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        return ItemEntry;
+    })();
+
     ws.BatchResp = (function() {
 
         /**
@@ -7376,7 +9627,7 @@ $root.ws = (function() {
         function BatchResp(properties) {
             this.msgs = [];
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -7414,7 +9665,7 @@ $root.ws = (function() {
             if (!writer)
                 writer = $Writer.create();
             if (message.msgs != null && message.msgs.length)
-                for (var i = 0; i < message.msgs.length; ++i)
+                for (let i = 0; i < message.msgs.length; ++i)
                     $root.ws.WSResp.encode(message.msgs[i], writer.uint32(/* id 1, wireType 2 =*/10).fork()).ldelim();
             return writer;
         };
@@ -7446,9 +9697,9 @@ $root.ws = (function() {
         BatchResp.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.BatchResp();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.BatchResp();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     if (!(message.msgs && message.msgs.length))
@@ -7493,8 +9744,8 @@ $root.ws = (function() {
             if (message.msgs != null && message.hasOwnProperty("msgs")) {
                 if (!Array.isArray(message.msgs))
                     return "msgs: array expected";
-                for (var i = 0; i < message.msgs.length; ++i) {
-                    var error = $root.ws.WSResp.verify(message.msgs[i]);
+                for (let i = 0; i < message.msgs.length; ++i) {
+                    let error = $root.ws.WSResp.verify(message.msgs[i]);
                     if (error)
                         return "msgs." + error;
                 }
@@ -7513,12 +9764,12 @@ $root.ws = (function() {
         BatchResp.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.BatchResp)
                 return object;
-            var message = new $root.ws.BatchResp();
+            let message = new $root.ws.BatchResp();
             if (object.msgs) {
                 if (!Array.isArray(object.msgs))
                     throw TypeError(".ws.BatchResp.msgs: array expected");
                 message.msgs = [];
-                for (var i = 0; i < object.msgs.length; ++i) {
+                for (let i = 0; i < object.msgs.length; ++i) {
                     if (typeof object.msgs[i] !== "object")
                         throw TypeError(".ws.BatchResp.msgs: object expected");
                     message.msgs[i] = $root.ws.WSResp.fromObject(object.msgs[i]);
@@ -7539,12 +9790,12 @@ $root.ws = (function() {
         BatchResp.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.arrays || options.defaults)
                 object.msgs = [];
             if (message.msgs && message.msgs.length) {
                 object.msgs = [];
-                for (var j = 0; j < message.msgs.length; ++j)
+                for (let j = 0; j < message.msgs.length; ++j)
                     object.msgs[j] = $root.ws.WSResp.toObject(message.msgs[j], options);
             }
             return object;
@@ -7584,7 +9835,7 @@ $root.ws = (function() {
         function BatchReq(properties) {
             this.reqs = [];
             if (properties)
-                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                for (let keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
@@ -7622,7 +9873,7 @@ $root.ws = (function() {
             if (!writer)
                 writer = $Writer.create();
             if (message.reqs != null && message.reqs.length)
-                for (var i = 0; i < message.reqs.length; ++i)
+                for (let i = 0; i < message.reqs.length; ++i)
                     $root.ws.WSReq.encode(message.reqs[i], writer.uint32(/* id 1, wireType 2 =*/10).fork()).ldelim();
             return writer;
         };
@@ -7654,9 +9905,9 @@ $root.ws = (function() {
         BatchReq.decode = function decode(reader, length) {
             if (!(reader instanceof $Reader))
                 reader = $Reader.create(reader);
-            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.BatchReq();
+            let end = length === undefined ? reader.len : reader.pos + length, message = new $root.ws.BatchReq();
             while (reader.pos < end) {
-                var tag = reader.uint32();
+                let tag = reader.uint32();
                 switch (tag >>> 3) {
                 case 1:
                     if (!(message.reqs && message.reqs.length))
@@ -7701,8 +9952,8 @@ $root.ws = (function() {
             if (message.reqs != null && message.hasOwnProperty("reqs")) {
                 if (!Array.isArray(message.reqs))
                     return "reqs: array expected";
-                for (var i = 0; i < message.reqs.length; ++i) {
-                    var error = $root.ws.WSReq.verify(message.reqs[i]);
+                for (let i = 0; i < message.reqs.length; ++i) {
+                    let error = $root.ws.WSReq.verify(message.reqs[i]);
                     if (error)
                         return "reqs." + error;
                 }
@@ -7721,12 +9972,12 @@ $root.ws = (function() {
         BatchReq.fromObject = function fromObject(object) {
             if (object instanceof $root.ws.BatchReq)
                 return object;
-            var message = new $root.ws.BatchReq();
+            let message = new $root.ws.BatchReq();
             if (object.reqs) {
                 if (!Array.isArray(object.reqs))
                     throw TypeError(".ws.BatchReq.reqs: array expected");
                 message.reqs = [];
-                for (var i = 0; i < object.reqs.length; ++i) {
+                for (let i = 0; i < object.reqs.length; ++i) {
                     if (typeof object.reqs[i] !== "object")
                         throw TypeError(".ws.BatchReq.reqs: object expected");
                     message.reqs[i] = $root.ws.WSReq.fromObject(object.reqs[i]);
@@ -7747,12 +9998,12 @@ $root.ws = (function() {
         BatchReq.toObject = function toObject(message, options) {
             if (!options)
                 options = {};
-            var object = {};
+            let object = {};
             if (options.arrays || options.defaults)
                 object.reqs = [];
             if (message.reqs && message.reqs.length) {
                 object.reqs = [];
-                for (var j = 0; j < message.reqs.length; ++j)
+                for (let j = 0; j < message.reqs.length; ++j)
                     object.reqs[j] = $root.ws.WSReq.toObject(message.reqs[j], options);
             }
             return object;
@@ -7775,4 +10026,4 @@ $root.ws = (function() {
     return ws;
 })();
 
-module.exports = $root;
+export { $root as default };

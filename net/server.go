@@ -5,6 +5,7 @@ import (
 	"mssgServer/infra/log"
 	"mssgServer/infra/metrics"
 	rediscache "mssgServer/infra/redis"
+	"mssgServer/infra/util"
 	"net/http"
 	_ "net/http/pprof" // 自动注册 /debug/pprof/*
 	"time"
@@ -50,8 +51,17 @@ func (s *Server) Start() {
 
 	log.Info("server starting", "addr", s.address)
 	go func() {
-		if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("listen and serve failed", "addr", s.address, "err", err)
+		// 自定义 TCP Listener：增大 backlog，抗并发连接风暴
+		// 直接调 syscall.Listen(fd, 4096)，跨所有 Go 版本生效，附带 SO_REUSEADDR
+		ln, err := util.ListenTCP(s.address, 4096)
+		if err != nil {
+			log.Error("listen failed", "addr", s.address, "err", err)
+			return
+		}
+		log.Info("TCP backlog=4096", "addr", s.address)
+
+		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Error("serve failed", "addr", s.address, "err", err)
 		}
 	}()
 }

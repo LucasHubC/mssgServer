@@ -5,6 +5,7 @@ import (
 	"mssgServer/infra/log"
 	rediscache "mssgServer/infra/redis"
 	"mssgServer/net"
+	wspb "mssgServer/proto"
 	invDAO "mssgServer/server/inventory/dao"
 	invProto "mssgServer/server/inventory/proto"
 	"net/http"
@@ -31,25 +32,23 @@ func (c *ItemController) Router(r *net.Router) {
 
 // add 增加道具
 func (c *ItemController) add(req *net.WsMsgReq, rsp *net.WsMsgResp) {
-	uid := net.GetUid(req.Conn)
+	uid, _ := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "未登录"}
 		return
 	}
-	body := &invProto.AddItemReq{}
-	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
+	body, ok := req.Body.Msg.(*wspb.InventoryAdd)
+	if !ok {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	// ✅ Bug #3 fix: 校验 count
 	if body.Count <= 0 {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "数量必须大于 0"}
 		return
 	}
-	// 取 before（必须在 AddItem 之前）
 	before, _ := rediscache.GetItemCount(uid, body.ItemId)
 	newCount, err := rediscache.AddItem(uid, body.ItemId, body.Count)
 	if err != nil {
@@ -59,76 +58,71 @@ func (c *ItemController) add(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	}
 	invDAO.ItemOpLogDAO.InsertSafe(uid, body.ItemId, 1, body.Count, before, newCount, "ws_cmd")
 	rsp.Body.Code = 0
-	rsp.Body.Msg = &invProto.AddItemResp{ItemId: body.ItemId, NewCount: newCount}
+	rsp.Body.Msg = &wspb.InventoryAddResp{ItemId: body.ItemId, NewCount: newCount}
 }
 
 // consume 使用/消耗道具
 func (c *ItemController) consume(req *net.WsMsgReq, rsp *net.WsMsgResp) {
-	uid := net.GetUid(req.Conn)
+	uid, _ := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "未登录"}
 		return
 	}
-	body := &invProto.ConsumeItemReq{}
-	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
+	body, ok := req.Body.Msg.(*wspb.InventoryConsume)
+	if !ok {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	// ✅ Bug #3 fix: 校验 count
 	if body.Count <= 0 {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "数量必须大于 0"}
 		return
 	}
-	// ✅ Bug #2 fix: ConsumeItem 直接返回 newCount，不再额外 GetItemCount
-	ok, countOrBefore, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
+	ok2, countOrBefore, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
 	if err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "操作失败"}
 		return
 	}
-	if !ok {
+	if !ok2 {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "道具数量不足"}
 		return
 	}
-	// 日志：before = countOrBefore + body.Count（因为成功时 Lua 返回的是扣减后 count）
 	before := countOrBefore + body.Count
 	invDAO.ItemOpLogDAO.InsertSafe(uid, body.ItemId, 2, body.Count, before, countOrBefore, "ws_cmd")
 	rsp.Body.Code = 0
-	rsp.Body.Msg = &invProto.ConsumeItemResp{ItemId: body.ItemId, NewCount: countOrBefore}
+	rsp.Body.Msg = &wspb.InventoryConsumeResp{ItemId: body.ItemId, NewCount: countOrBefore}
 }
 
 // drop 丢弃道具
 func (c *ItemController) drop(req *net.WsMsgReq, rsp *net.WsMsgResp) {
-	uid := net.GetUid(req.Conn)
+	uid, _ := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "未登录"}
 		return
 	}
-	body := &invProto.DropItemReq{}
-	if err := net.ParseMsg(req.Body.Msg, body); err != nil {
+	body, ok := req.Body.Msg.(*wspb.InventoryDrop)
+	if !ok {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	// ✅ Bug #3 fix: 校验 count
 	if body.Count <= 0 {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "数量必须大于 0"}
 		return
 	}
-	// ✅ Bug #2 fix: 直接用 ConsumeItem 返回的 newCount
-	ok, newCount, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
+	ok2, newCount, err := rediscache.ConsumeItem(uid, body.ItemId, body.Count)
 	if err != nil {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "操作失败"}
 		return
 	}
-	if !ok {
+	if !ok2 {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "道具数量不足"}
 		return
@@ -136,12 +130,12 @@ func (c *ItemController) drop(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	before := newCount + body.Count
 	invDAO.ItemOpLogDAO.InsertSafe(uid, body.ItemId, 3, body.Count, before, newCount, "ws_cmd")
 	rsp.Body.Code = 0
-	rsp.Body.Msg = &invProto.DropItemResp{ItemId: body.ItemId, NewCount: newCount}
+	rsp.Body.Msg = &wspb.InventoryDropResp{ItemId: body.ItemId, NewCount: newCount}
 }
 
 // get 查背包
 func (c *ItemController) get(req *net.WsMsgReq, rsp *net.WsMsgResp) {
-	uid := net.GetUid(req.Conn)
+	uid, _ := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "未登录"}
@@ -153,12 +147,12 @@ func (c *ItemController) get(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "查询失败"}
 		return
 	}
-	itemList := make([]invProto.ItemInfo, 0, len(items))
+	itemList := make([]*wspb.ItemEntry, 0, len(items))
 	for id, count := range items {
-		itemList = append(itemList, invProto.ItemInfo{ItemId: id, Count: count})
+		itemList = append(itemList, &wspb.ItemEntry{ItemId: id, Count: count})
 	}
 	rsp.Body.Code = 0
-	rsp.Body.Msg = &invProto.GetInventoryResp{Items: itemList, Total: len(itemList)}
+	rsp.Body.Msg = &wspb.InventoryGetResp{Items: itemList, Total: int32(len(itemList))}
 }
 
 // ────────────────────────────────────────
