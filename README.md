@@ -69,7 +69,44 @@ Broker dial ws://127.0.0.1:8004 → 客户端的登录/背包消息全部路由�
 - **广播**：Redis Pub/Sub `broadcast:*` 频道 — 任节点 Publish，全节点 Subscribe 并在本机 uidMap 查找推送
 - **RPC**：Redis Stream `rpc:*` — 支持 `ping`、`get_online_count`、`get_inventory` 等跨节点调用
 - **用户定位**：Redis Key `online:user:{uid}` = `nodeAddr` — 查"某玩家在哪个节点"只需 O(1)
-- **踢人/重连**：BindUser 时 SETNX 抢锁，抢到锁的节点向旧节点发 kick 广播
+### 客户端断线重连机制（服务端内部）
+
+重连链路是**完整闭环**：被动侧自动清理、主动侧安全绑定，全靠 Redis 分布式锁 + Gateway 无状态路由支撑。
+
+#### 被动侧：断线那一刻的自动清理
+
+| 发生层 | 做了什么 | Redis 状态 |
+|---|---|---|
+| 客户端 ↔ broker | WS TCP 断 → `proxySession.Close()` | — |
+| broker proxySession | `UnregisterUID` + 关闭所有 backend WS | — |
+| login / chat / room 节点 | `ConnManager.Unregister(ws)` | ❌ `DEL online:user:{uid}` |
+
+即使某层 DEL 失败，**30s TTL 兜底**：BindUser 写 key 时 TTL=30s，心跳每 5s 续期；真断线了心跳停止 → 30s 后自动过期。
+
+#### 主动侧：客户端重连的安全绑定
+
+```
+客户端 → Gateway dispatch（选 broker）→ broker dialAll（选 login/chat/room）
+      → 客户端发登录包 → login handler BindUser
+          ├─ SETNX lock:bind:{uid} (5s 锁，防两个节点同时绑)
+          ├─ SET online:user:{uid} = nodeAddr (TTL=30s)
+          ├─ 本机 uidMap[{uid}] = ws
+          └─ 踢本机旧 WS（同节点内残留的旧连接）
+```
+
+#### 三个关键设计点
+
+| 设计点 | 解决什么问题 | 代码位置 |
+|---|---|---|
+| **分布式锁 SETNX** | 客户端闪断 1s 内重连，旧连接清理可能还没跑完 → 防止两个 login 同时绑同一个 uid | `infra/redis/redis.go:105` |
+| **30s TTL + 心跳续期** | DEL 失败（Redis 短暂不可用）兜底；每 5s heartbeat 批量 Touch 重置 TTL | `infra/redis/redis.go:141`, `net/conn_manager.go:300` |
+| **踢同节点旧 WS** | 重连分到同一个 login（`least_conn` 打平时发生）→ 旧 WS 还没清 → 主动 Close 触发 Unregister | `net/conn_manager.go:94` |
+
+#### 已验证场景（压测 1000 并发）
+
+- broker 崩了 → Gateway 15s 自动摘除 → 重连派到活的 broker（零 ECONNREFUSED）
+- 客户端闪断 1s 内重连 → 分布式锁保证只有一个 login 绑定（无 uid 冲突）
+- 同节点重连 → 旧 WS 自动踢掉（无残留连接）
 
 ### 节点生命周期
 
@@ -216,6 +253,96 @@ ws.onopen = () => {
 };
 ```
 
+### 断线重连（客户端必须实现）
+
+本项目使用**范式 B 两阶段连接**，`broker` 和 `Gateway` 都是无状态的——客户端断线重连时**必须重走完整流程**，不能假设能回到原来的 broker 或 login 节点。
+
+#### 重连步骤
+
+```
+① 重走 dispatch: GET /gateway/dispatch?uid=xxx&token=xxx
+② 用返回的新 broker_url 建 WS（不要缓存旧的！Gateway 可能选了更空的 broker）
+③ 发登录包（和首次连接完全一样）
+④ 重订阅业务（如果是 chat 业务，要重新 join 目标 room/group）
+```
+
+#### 注意事项
+
+| 事项 | 原因 |
+|---|---|
+| **不要缓存 broker_url** | `least_conn` 策略会根据实时在线人数选更空的 broker；旧 broker 可能已崩（Gateway 15s 自动摘除）|
+| **用 `uid` 做 dispatch 入参** | Gateway 的 `uid_hash` 策略依赖 uid 做一致性哈希（如果改了 policy=uid_hash）|
+| **实现指数退避** | 避免 broker 崩时客户端同时重连形成雪崩；推荐间隔：1s→2s→4s→8s→16s→32s 上限 |
+| **不要假设回到同一 login** | login 节点由 broker 的 `dialAll` 重新从 Gateway 路由，可能变了；但 Redis `online:user:{uid}` 分布式锁会保证只有一个 login 绑定成功 |
+
+#### JavaScript 自动重连封装示例
+
+```javascript
+class AutoReconnectWS {
+  constructor(uid, token) {
+    this.uid = uid;
+    this.token = token;
+    this.ws = null;
+    this.reconnectDelay = 1000; // 初始 1s
+    this.maxDelay = 32000;       // 上限 32s
+    this.isManualClose = false;
+    this._connect();
+  }
+
+  async _connect() {
+    // ① 重走 dispatch，拿最新 broker_url
+    const res = await fetch(
+      `http://127.0.0.1:9000/gateway/dispatch?uid=${this.uid}&token=${this.token}`
+    ).then(r => r.json());
+    if (res.code !== 0) {
+      this._scheduleReconnect();
+      return;
+    }
+    const brokerUrl = res.broker_url;
+
+    // ② 建 WS
+    this.ws = new WebSocket(brokerUrl);
+    this.ws.binaryType = "arraybuffer";
+
+    this.ws.onopen = () => {
+      this.reconnectDelay = 1000; // 重置退避
+      // ③ 发登录包
+      const loginReq = protobuf.encode({
+        name: "account.login",
+        authUid: this.uid,
+        token: this.token
+      }).finish();
+      this.ws.send(loginReq);
+      console.log(`[WS] Connected to ${brokerUrl}`);
+    };
+
+    this.ws.onclose = (ev) => {
+      if (this.isManualClose) return;
+      console.warn(`[WS] Closed (code=${ev.code}), reconnecting in ${this.reconnectDelay}ms`);
+      this._scheduleReconnect();
+    };
+
+    this.ws.onerror = () => {
+      // close 事件会紧接着触发，这里不用额外处理
+    };
+  }
+
+  _scheduleReconnect() {
+    if (this.isManualClose) return;
+    setTimeout(() => this._connect(), this.reconnectDelay);
+    // 指数退避：1s → 2s → 4s → 8s → 16s → 32s
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxDelay);
+  }
+
+  close() {
+    this.isManualClose = true;
+    this.ws?.close();
+  }
+}
+
+// 使用
+const wsClient = new AutoReconnectWS("alice", "tk_xxx");
+```
 
 ---
 
