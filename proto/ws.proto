@@ -1,0 +1,309 @@
+syntax = "proto3";
+
+package ws;
+
+option go_package = "mssgServer/proto";
+
+// ═══════════════════════════════════════════
+//  外层 WS 包裹 — Transport 层
+// ═══════════════════════════════════════════
+
+// WS 请求
+message WSReq {
+  int64 seq = 1;
+  string name = 2;
+  string proxy = 3;
+  string auth_uid = 4;        // ✅ Broker 注入的 uid，外层字段
+  string auth_username = 5;   // ✅ Broker 注入的 username
+
+  // 阶段 2：业务消息 oneof（类型安全，零 JSON）
+  oneof msg {
+    // account.*
+    AccountLogin    account_login     = 10;
+    AccountRegister account_register  = 11;
+    // chat.*
+    ChatWorldSend   chat_world_send   = 20;
+    ChatPrivateSend chat_private_send = 21;
+    ChatGroupSend   chat_group_send   = 22;
+    GroupMember     group_member_req  = 23;
+    // room.*
+    RoomCreate room_create = 30;
+    RoomJoin   room_join   = 31;
+    RoomLeave  room_leave  = 32;
+    RoomKick   room_kick   = 33;
+    RoomDelete room_delete = 34;
+    RoomSend   room_send   = 35;
+    // inventory.*
+    InventoryAdd     inventory_add     = 50;
+    InventoryConsume inventory_consume = 51;
+    InventoryDrop    inventory_drop    = 52;
+    InventoryGet     inventory_get     = 53;
+  }
+
+  // 兜底：老版本 msg_json 字符串（渐进式，handler 还没全改完时用）
+  string msg_json = 100;
+}
+
+// WS 响应
+message WSResp {
+  int64 seq = 1;
+  string name = 2;
+  int32 code = 3;
+
+  oneof msg {
+    // account.*
+    AccountLoginResp    account_login_resp    = 10;
+    AccountRegisterResp account_register_resp = 11;
+    // chat.*
+    ChatWorldNew     chat_world_new     = 20;
+    ChatPrivateNew   chat_private_new   = 21;
+    ChatGroupNew     chat_group_new     = 22;
+    GroupMemberResp  group_member_resp  = 23;
+    ChatOnlineResp   chat_online_resp   = 24;
+    // room.*
+    RoomCreateResp room_create_resp = 30;
+    RoomJoinResp   room_join_resp   = 31;
+    RoomChatNew    room_chat_new  = 32;
+    RoomNotice     room_notice    = 33;
+    // system.*
+    SystemBroadcast system_broadcast = 40;
+    SystemPush      system_push      = 41;
+    // inventory.*
+    InventoryAddResp     inventory_add_resp     = 50;
+    InventoryConsumeResp inventory_consume_resp = 51;
+    InventoryDropResp    inventory_drop_resp    = 52;
+    InventoryGetResp     inventory_get_resp     = 53;
+  }
+
+  // 兜底
+  string msg_json = 100;
+}
+
+// ═══════════════════════════════════════════
+//  Account 业务消息
+// ═══════════════════════════════════════════
+
+message AccountLogin {
+  string username = 1;
+  string password = 2;
+}
+
+message AccountLoginResp {
+  string username = 1;
+  string token = 2;
+  string uid = 3;
+  map<string, int64> items = 4;
+}
+
+message AccountRegister {
+  string username = 1;
+  string password = 2;
+}
+
+message AccountRegisterResp {
+  string username = 1;
+  string uid = 2;
+}
+
+// ═══════════════════════════════════════════
+//  Chat 业务消息
+// ═══════════════════════════════════════════
+
+message ChatWorldSend {
+  string content = 1;
+}
+
+message ChatPrivateSend {
+  string to_uid = 1;
+  string content = 2;
+}
+
+message ChatGroupSend {
+  string group_id = 1;
+  string content = 2;
+}
+
+message GroupMember {
+  string group_id = 1;
+}
+
+message GroupMemberResp {
+  string group_id = 1;
+  repeated string members = 2;
+  int32 count = 3;
+}
+
+message ChatOnlineResp {
+  int32 total = 1;
+  repeated string uids = 2;
+}
+
+// ═══════════════════════════════════════════
+//  Chat Push 推送消息（后端→客户端）
+// ═══════════════════════════════════════════
+
+message ChatWorldNew {
+  string msg_id = 1;
+  string from_uid = 2;
+  string from_name = 3;
+  string content = 4;
+  int64 timestamp = 5;
+}
+
+message ChatPrivateNew {
+  string msg_id = 1;
+  string from_uid = 2;
+  string from_name = 3;
+  string content = 4;
+  int64 timestamp = 5;
+}
+
+message ChatGroupNew {
+  string msg_id = 1;
+  string group_id = 2;
+  string from_uid = 3;
+  string from_name = 4;
+  string content = 5;
+  int64 timestamp = 6;
+}
+
+// ═══════════════════════════════════════════
+//  Room 业务消息
+// ═══════════════════════════════════════════
+
+message RoomCreate {
+  string name = 1;
+  int32 max_size = 2;
+}
+
+message RoomCreateResp {
+  string room_id = 1;
+  string owner = 2;
+  string name = 3;
+}
+
+message RoomJoin {
+  string room_id = 1;
+}
+
+message RoomJoinResp {
+  string room_id = 1;
+  string name = 2;
+  string owner = 3;
+  int32 size = 4;
+  int32 max = 5;
+  repeated string members = 6;
+}
+
+message RoomLeave {
+  string room_id = 1;
+}
+
+message RoomKick {
+  string room_id = 1;
+  string target_uid = 2;
+}
+
+message RoomDelete {
+  string room_id = 1;
+}
+
+message RoomSend {
+  string room_id = 1;
+  string content = 2;
+}
+
+message RoomChatNew {
+  string msg_id = 1;
+  string room_id = 2;
+  string from_uid = 3;
+  string from_name = 4;
+  string content = 5;
+  int64 timestamp = 6;
+}
+
+message RoomNotice {
+  string type = 1;
+  string room_id = 2;
+  string uid = 3;
+  string username = 4;
+  repeated string members = 5;
+}
+
+// ═══════════════════════════════════════════
+//  System Push 推送（admin 跨服广播）
+// ═══════════════════════════════════════════
+
+message SystemBroadcast {
+  string content = 1;
+  int64 timestamp = 2;
+}
+
+message SystemPush {
+  string content = 1;
+  int64 timestamp = 2;
+}
+
+// ═══════════════════════════════════════════
+//  Inventory 业务消息
+// ═══════════════════════════════════════════
+
+message InventoryAdd {
+  string item_id = 1;
+  int64 count = 2;
+}
+
+message InventoryConsume {
+  string item_id = 1;
+  int64 count = 2;
+}
+
+message InventoryDrop {
+  string item_id = 1;
+  int64 count = 2;
+}
+
+message InventoryGet {
+  // empty
+}
+
+message InventoryAddResp {
+  string item_id = 1;
+  int64 new_count = 2;
+}
+
+message InventoryConsumeResp {
+  string item_id = 1;
+  int64 new_count = 2;
+}
+
+message InventoryDropResp {
+  string item_id = 1;
+  int64 new_count = 2;
+}
+
+message InventoryGetResp {
+  repeated ItemEntry items = 1;
+  int32 total = 2;
+}
+
+message ItemEntry {
+  string item_id = 1;
+  int64 count = 2;
+  string name = 3;
+}
+
+// ═══════════════════════════════════════════
+//  Batch 批量消息 — 减少 socket syscall
+//  服务端 writeMsgLoop 把多条 WSResp 合并成一个帧
+// ═══════════════════════════════════════════
+
+// 服务端批量推送给客户端
+message BatchResp {
+  repeated WSResp msgs = 1;
+}
+
+// 客户端批量发送给服务端（预留，暂不用）
+message BatchReq {
+  repeated WSReq reqs = 1;
+}

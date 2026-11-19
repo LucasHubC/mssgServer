@@ -1,14 +1,17 @@
 package net
 
 import (
-	"encoding/json"
+	"fmt"
 	"mssgServer/infra/log"
+	"mssgServer/infra/metrics"
+	wspb "mssgServer/proto"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 )
 
 // workerPool 全局消息处理协程池（用 channel 做信号量）
@@ -19,6 +22,12 @@ var workerPool = make(chan struct{}, 2048)
 
 // handlerWg 全局 handler WaitGroup — 用于 graceful shutdown 时等所有在跑的 handler 跑完
 var handlerWg sync.WaitGroup
+
+// 诊断用 sync.Once：仅打印一次首次收到 Broker 注入的 __uid、首次 BindUid 的日志
+var (
+	uidMsgDiagOnce    sync.Once
+	bindUidDiagOnceWS sync.Once
+)
 
 // WaitHandlers 阻塞等所有正在执行的 handler 跑完（graceful shutdown 时调）
 func WaitHandlers() {
@@ -34,12 +43,17 @@ const (
 
 // WSServer 服务器端
 type WSServer struct {
-	wsConn *websocket.Conn
+	wsConn    *websocket.Conn
+	startTime time.Time // 连接建立时间，用于 ConnectionLifetime 埋点
 
 	router *Router
 
 	outChan chan *WsMsgResp
 
+	// Seq 序列号 —— 不再用 atomic！
+	// writeMsgLoop 是单 goroutine 消费 outChan，Seq 自增在那里完成，完全不需要 CAS
+	// Seq 序列号 —— 不再用 atomic！
+	// writeMsgLoop 是单 goroutine 消费 outChan，Seq 自增在那里完成，完全不需要 CAS
 	Seq int64
 
 	property map[string]interface{}
@@ -72,12 +86,13 @@ type WSServer struct {
 
 func newWsServer(wsConn *websocket.Conn) *WSServer {
 	return &WSServer{
-		wsConn:   wsConn,
-		outChan:  make(chan *WsMsgResp, 256),
-		property: make(map[string]interface{}),
-		Seq:      0,
-		limiter:  rate.NewLimiter(30, 50),
-		done:     make(chan struct{}),
+		startTime: time.Now(),
+		wsConn:    wsConn,
+		outChan:   make(chan *WsMsgResp, 16384), // 16384 指针 × 8B = 128KB/conn，扛 2s world 广播洪峰，比 32768 省 128KB/conn
+		property:  make(map[string]interface{}),
+		Seq:       0,
+		limiter:   rate.NewLimiter(100, 500), // 正常玩家 1s 5-10 条足够，100/s 防刷 DB，突发 500 条扛洪峰
+		done:      make(chan struct{}),
 	}
 }
 
@@ -98,7 +113,7 @@ func (s *WSServer) GetProperty(key string) (interface{}, error) {
 	if value, ok := s.property[key]; ok {
 		return value, nil
 	}
-	return nil, nil
+	return nil, fmt.Errorf("property %s not found", key)
 }
 
 func (s *WSServer) RemoveProperty(key string) {
@@ -121,35 +136,40 @@ func (s *WSServer) writeMessage(msgType int, data []byte) error {
 
 // safeSend 向 outChan 投递消息，连接已关闭或通道满时返回 false（绝不 panic）
 // sendMu 与 Close 互斥，保证不会向已关闭的 channel 发送
+var dropLogCount int64 // 全局丢包计数（限频用）
+
 func (s *WSServer) safeSend(msg *WsMsgResp) bool {
 	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
 	if s.closed {
+		s.sendMu.Unlock()
 		return false
 	}
 	select {
 	case s.outChan <- msg:
+		s.sendMu.Unlock()
 		return true
 	default:
-		log.Warn("outChan full, drop message", "addr", s.Addr())
+		s.sendMu.Unlock()
+		metrics.DroppedMessages.WithLabelValues("outchan_full").Inc()
+		if atomic.AddInt64(&dropLogCount, 1)%100 == 0 {
+			log.Warn("outChan full, drop message", "addr", s.Addr(), "name", msg.Body.Name, "totalDropped", atomic.LoadInt64(&dropLogCount))
+		}
 		return false
 	}
 }
 
-// Push 向本连接推送消息（非阻塞，outChan 满或连接已关时丢弃并记日志）
+// Push 向本连接推送消息（非阻塞，outChan 满或连接已关时丢弃）
+// Seq 在 writeMsgLoop 里统一赋值（单 goroutine，不需要 atomic）
 func (s *WSServer) Push(name string, data interface{}) {
-	seq := atomic.AddInt64(&s.Seq, 1) // 🔴 并发安全的序列号
 	rsp := &WsMsgResp{
 		Body: &RespBody{
-			Seq:  seq,
+			Seq:  0, // 占位，writeMsgLoop 里统一填
 			Name: name,
 			Code: 0,
 			Msg:  data,
 		},
 	}
-	if !s.safeSend(rsp) {
-		log.Warn("Push: outChan full or closed, drop message", "addr", s.Addr(), "name", name)
-	}
+	s.safeSend(rsp)
 }
 
 // 通道一旦建立 那么收发消息都要持续去监听通道
@@ -185,17 +205,81 @@ func (s *WSServer) pingLoop() {
 	}
 }
 
+const (
+	batchMaxSize   = 32                   // 每帧最多合并 32 条，减少一半 TCP syscall
+	batchFlushWait = 5 * time.Millisecond // 没满但等了 5ms 立刻刷，低负载也能攒更多
+)
+
+// writeMsgLoop 写连接 — 支持批量合并减少 socket syscall
+// 每 batchMaxSize 条或 batchFlushWait 超时，合并成 BatchResp 一次写入
 func (s *WSServer) writeMsgLoop() {
-	for msg := range s.outChan {
-		data, err := json.Marshal(msg.Body)
-		if err != nil {
-			log.Error("marshal response failed", "err", err)
-			continue
-		}
-		if err := s.writeMessage(websocket.TextMessage, data); err != nil {
-			log.Error("write message failed", "addr", s.Addr(), "err", err)
+	batch := make([]*wspb.WSResp, 0, batchMaxSize)
+
+	flush := func() {
+		if len(batch) == 0 {
 			return
 		}
+		// 🔴 统一给每条消息赋 Seq（单 goroutine，直接 s.Seq++）
+		for _, p := range batch {
+			p.Seq = s.Seq
+			s.Seq++
+		}
+		metrics.BatchSize.Observe(float64(len(batch)))
+		var data []byte
+		var err error
+		if len(batch) == 1 {
+			// 单条直接发 WSResp，不用 BatchResp 包装（省 proto 编解码开销）
+			data, err = proto.Marshal(batch[0])
+		} else {
+			// 多条合并成 BatchResp
+			data, err = proto.Marshal(&wspb.BatchResp{Msgs: batch})
+		}
+		if err == nil {
+			writeStart := time.Now()
+			if werr := s.writeMessage(websocket.BinaryMessage, data); werr != nil {
+				metrics.ErrorsTotal.WithLabelValues("write").Inc()
+				log.Error("write message failed", "addr", s.Addr(), "err", werr)
+			}
+			metrics.WriteDuration.Observe(time.Since(writeStart).Seconds())
+			metrics.MessagesOut.Add(float64(len(batch)))
+			metrics.BytesOut.Add(float64(len(data)))
+		}
+		batch = batch[:0]
+	}
+
+	for {
+		// 拿第一条
+		msg, ok := <-s.outChan
+		if !ok {
+			flush()
+			return
+		}
+		p, err := RespBodyToProto(msg.Body)
+		if err != nil {
+			log.Error("proto convert resp failed", "err", err)
+		} else {
+			batch = append(batch, p)
+		}
+
+		// 尝试再拿 batchMaxSize-1 条（非阻塞 + 超时）
+		for len(batch) < batchMaxSize {
+			select {
+			case msg2, ok := <-s.outChan:
+				if !ok {
+					flush()
+					return
+				}
+				p2, err2 := RespBodyToProto(msg2.Body)
+				if err2 == nil {
+					batch = append(batch, p2)
+				}
+			case <-time.After(batchFlushWait):
+				flush()
+				goto next
+			}
+		}
+		flush()
+	next:
 	}
 }
 
@@ -213,17 +297,55 @@ func (s *WSServer) readMsgLoop() {
 		_, messageData, err := s.wsConn.ReadMessage() // 阻塞等待客户端发来消息
 
 		if err != nil {
+			metrics.ErrorsTotal.WithLabelValues("read").Inc()
 			log.Warn("read message failed", "addr", s.Addr(), "err", err)
 			break
 		}
+		metrics.MessagesIn.Inc()
+		metrics.BytesIn.Add(float64(len(messageData)))
 
-		log.Debug("recv raw", "addr", s.Addr(), "data", string(messageData))
-
-		body := &ReqBody{}
-		err = json.Unmarshal(messageData, body)
+		// Protobuf 解码
+		p := &wspb.WSReq{}
+		err = proto.Unmarshal(messageData, p)
 		if err != nil {
-			log.Warn("unmarshal message failed", "addr", s.Addr(), "err", err, "raw", string(messageData))
+			log.Warn("proto unmarshal message failed", "addr", s.Addr(), "err", err)
 			break
+		}
+		body, err := ReqBodyFromProto(p)
+		if err != nil {
+			log.Warn("ReqBodyFromProto failed", "addr", s.Addr(), "err", err)
+			break
+		}
+
+		// ── 做法 A 核心：从 Broker 注入的 uid 自动设 WS Property + BindUid ──
+		// ⚠️ 双重来源：
+		//   ① 阶段 2 新方式: 外层 body.AuthUid (Broker injectAuthProtobuf 直接填)
+		//   ② 阶段 1 兜底:   msg_json 里的 __uid (老客户端)
+		// 直连场景 (HTTP Gateway 或测试工具): 两个都没有，跳过
+		// ⚠️ SetProperty ≠ BindUid！前者让 handler 能读 uid，后者让 admin/kick 能找到 WS
+		var uid, username string
+		uid = body.AuthUid // ✅ 阶段 2：优先读外层鉴权字段
+		if uid == "" && body.Msg != nil {
+			// 🔁 兜底：从 msg_json 解出来的 map 里找 __uid(阶段 1)
+			if m, ok := body.Msg.(map[string]interface{}); ok {
+				if u, _ := m["__uid"].(string); u != "" {
+					uid = u
+					if un, _ := m["__username"].(string); un != "" {
+						username = un
+					}
+				}
+			}
+		}
+		if uid != "" {
+			s.SetProperty("uid", uid)
+			if username != "" {
+				s.SetProperty("username", username)
+			}
+			// BindUid 只绑定一次（同一 WS 收到多条带 uid 的消息只第一次生效）
+			if _, err := s.GetProperty("__bound"); err != nil {
+				ConnManager.BindUid(uid, s, true) // skipRedis=true: 后端代理只写本机 uidMap
+				s.SetProperty("__bound", true)
+			}
 		}
 
 		// ✅ 限流检查：Allow 不阻塞，超限直接断开
@@ -243,14 +365,21 @@ func (s *WSServer) readMsgLoop() {
 			go func() {
 				defer handlerWg.Done()
 				defer func() { <-workerPool }()
+				metrics.ActiveHandlers.Inc()
+				handlerStart := time.Now()
+				defer metrics.ActiveHandlers.Dec()
 				defer func() {
 					if r := recover(); r != nil {
+						metrics.HandlersPanic.Inc()
+						metrics.ErrorsTotal.WithLabelValues("handler_panic").Inc()
 						log.Error("handler panic", "addr", s.Addr(), "name", body.Name, "err", r)
 					}
 				}()
 				s.router.Run(req, rsp)
+				metrics.HandlerDuration.Observe(time.Since(handlerStart).Seconds())
 				// 响应通过 safeSend 投递，连接已关或 outChan 满时安全跳过
 				if !s.safeSend(rsp) {
+					metrics.DroppedMessages.WithLabelValues("response_outchan_full").Inc()
 					log.Warn("outChan full or closed, drop response", "addr", s.Addr(), "name", body.Name)
 				}
 			}()
@@ -269,18 +398,16 @@ func (s *WSServer) readMsgLoop() {
 	s.Close()
 }
 
-// Close 关闭连接，幂等（sync.Once 保证只执行一次）
-// 关闭顺序：先在 sendMu 锁内置 closed=true 并 close(outChan)（让 writeMsgLoop 退出，
-// 同时阻止后续 safeSend），再关 wsConn，再关 done 通知 wsHandler
+// Close 幂等关闭：sendMu 锁住 → closed=true → close(outChan) → 解锁 → 关 done → 关 ws
 func (s *WSServer) Close() {
 	s.once.Do(func() {
+		metrics.ConnectionLifetime.Observe(time.Since(s.startTime).Seconds())
 		s.sendMu.Lock()
 		s.closed = true
 		close(s.outChan)
 		s.sendMu.Unlock()
-
-		s.wsConn.Close()
 		close(s.done)
+		s.wsConn.Close()
 	})
 }
 

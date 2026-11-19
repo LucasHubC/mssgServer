@@ -89,13 +89,13 @@ func TestPublishSubscribe_EchoFromSelf(t *testing.T) {
 
 		PublishBroadcast(BroadcastMsg{
 			Action: "kick",
-			UID:    "user_abc",
+			Target: "user_abc",
 		})
 
 		select {
 		case msg := <-received:
 			convey.So(msg.Action, convey.ShouldEqual, "kick")
-			convey.So(msg.UID, convey.ShouldEqual, "user_abc")
+			convey.So(msg.Target, convey.ShouldEqual, "user_abc")
 			convey.So(msg.FromNode, convey.ShouldEqual, "ws://self-test:9999")
 		case <-time.After(3 * time.Second):
 			t.Fatal("subscribe timeout, 没收到消息")

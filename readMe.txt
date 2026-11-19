@@ -1,3 +1,57 @@
+
+# 装依赖
+go get github.com/prometheus/client_golang/prometheus
+go get github.com/prometheus/client_golang/prometheus/promauto
+go get github.com/prometheus/client_golang/prometheus/promhttp
+go mod tidy
+
+
+
+
+# 检查 protoc 是否装了
+protoc --version
+
+# 如果没装，Windows 用 winget：
+winget install Google.Protobuf
+
+# 或手动下载：https://github.com/protocolbuffers/protobuf/releases
+
+# 下载 protoc-xx.x-win64.zip，解压到 C:\tools\protoc\bin，加 PATH
+
+# 安装 Go 代码生成器
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+# 验证
+protoc-gen-go --version
+
+
+cd e:\mssgServer
+
+# 用 protoc 生成 Go 代码  https://github.com/protocolbuffers/protobuf/releases/latest
+
+# 假设 protoc 装在 C:\tools\protoc\bin
+protoc --go_out=. --go_opt=paths=source_relative proto/ws.proto
+
+# 安装 protobuf runtime
+go get google.golang.org/protobuf
+
+# go mod tidy
+go mod tidy
+
+
+
+#客户端 testBench.js / testWS.js 改 Protobuf
+# 用 protobufjs 生成 JS（node 侧用 protobufjs）
+cd e:\mssgServer
+npm install protobufjs
+npx pbjs -t static-module -w commonjs -o proto/ws.js proto/ws.proto
+
+
+
+
+
+
+
 cd e:\mssgServer
 
 # 跑所有测试 + 输出覆盖率
@@ -172,3 +226,20 @@ curl -X POST http://127.0.0.1:9000/admin/broadcast `
       "endTime": 1750000000
     }
   }'
+
+
+
+  //工具说明 图集拆解
+  texture-unpacker 是一个 Node.js 工具，专门用来拆 TexturePacker 打包的图集，支持 Cocos2d-x、Cocos2d、PixiJS 等多种 plist 格式。
+  安装：
+
+bash
+npm install -g texture-unpacker
+使用：
+
+bash
+texture-unpacker -s 你的大图.png -f plist -d 你的文件.plist -o 输出目录
+参数说明：-s 指定合图 png，-f plist 声明数据格式，-d 指定 plist 文件，-o 指定输出目录。加上 -c 可以在拆分前清空输出目录。
+
+
+texture-unpacker -s starKeyLockRes.png -f plist -d starKeyLockRes.plist -o output

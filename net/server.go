@@ -1,9 +1,14 @@
 package net
 
 import (
+	"context"
 	"mssgServer/infra/log"
+	"mssgServer/infra/metrics"
 	rediscache "mssgServer/infra/redis"
+	"mssgServer/infra/util"
 	"net/http"
+	_ "net/http/pprof" // 自动注册 /debug/pprof/*
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -12,6 +17,7 @@ type Server struct {
 	address  string
 	router   *Router
 	nodeAddr string // 当前节点的 ws 地址（如 "ws://127.0.0.1:8003"），跨节点 Redis 同步用
+	httpSrv  *http.Server
 }
 
 func NewServer(addr string) *Server {
@@ -30,18 +36,47 @@ func (s *Server) SetNodeAddr(addr string) {
 }
 
 func (s *Server) Start() {
-	// ⚠️ ReadTimeout/WriteTimeout/IdleTimeout 对 WebSocket 长连接必须设为 0
-	// 否则 WebSocket 握手完成后，10s 内没发新请求就会被 HTTP Server 掐掉
-	srv := &http.Server{
+	metrics.Init()
+	metrics.RegisterHTTP() // /metrics + /health
+
+	s.httpSrv = &http.Server{
 		Addr:           s.address,
-		MaxHeaderBytes: 1 << 20,
+		MaxHeaderBytes: 1 << 20,           // 1MB header
+		ReadTimeout:    10 * time.Second,  // 整请求（含 body）读完超时，防半连接
+		WriteTimeout:   10 * time.Second,  // 整响应写完超时
+		IdleTimeout:    120 * time.Second, // Keep-Alive 空闲超时（Upgrade 前 HTTP 层用）
 	}
 
 	http.HandleFunc("/", s.wsHandler)
 
 	log.Info("server starting", "addr", s.address)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Error("listen and serve failed", "addr", s.address, "err", err)
+	go func() {
+		// 自定义 TCP Listener：增大 backlog，抗并发连接风暴
+		// 直接调 syscall.Listen(fd, 4096)，跨所有 Go 版本生效，附带 SO_REUSEADDR
+		ln, err := util.ListenTCP(s.address, 4096)
+		if err != nil {
+			log.Error("listen failed", "addr", s.address, "err", err)
+			return
+		}
+		log.Info("TCP backlog=4096", "addr", s.address)
+
+		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Error("serve failed", "addr", s.address, "err", err)
+		}
+	}()
+}
+
+// Shutdown 优雅关闭 HTTP Server（给活跃连接最多 5 秒收尾时间）
+func (s *Server) Shutdown() {
+	if s.httpSrv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.httpSrv.Shutdown(ctx); err != nil {
+		log.Warn("http server shutdown error", "err", err)
+	} else {
+		log.Info("http server gracefully stopped", "addr", s.address)
 	}
 }
 
@@ -79,7 +114,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			wsServer.SetProperty("username", sess.Username)
 			log.Info("ws auto auth via token", "uid", sess.UId, "username", sess.Username)
 			// 绑定到 ConnManager（跨服 PushToUid / BindUid 需要）
-			ConnManager.BindUid(sess.UId, wsServer)
+			ConnManager.BindUid(sess.UId, wsServer, true) // skipRedis: 后端只写本机 uidMap
 		} else {
 			log.Warn("ws auth failed: invalid token", "remote", r.RemoteAddr)
 		}

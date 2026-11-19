@@ -1,149 +1,220 @@
 @startuml
 autonumber
-
 skinparam responseMessageBelowArrow true
 skinparam sequenceMessageAlign center
 
-actor "🎮 Client" as C
-participant "Gateway\n:9000" as GW
-participant "loginServer\n:8003" as LS
-participant "chatServer\n:8004" as CS
-participant "Redis\n:6379" as R
-database "MySQL mssg" as DB
-database "MySQL game_log" as DBLog
+' =============================================================
+'  Login Complete Flow (Two Paths)
+'   Path A: HTTP login -> WS direct connect to each backend
+'   Path B: Gateway Broker two-stage connection (Recommended)
+' =============================================================
 
-' ═══════════════════════════════════════
-'  Part 1: HTTP 登录（拿 token）
-' ═══════════════════════════════════════
-== Part 1: HTTP POST /api/login (apiLoginServer :8005) ==
+actor "Client" as C
+participant "Gateway:9000" as GW
+participant "Broker:9001" as BR
+participant "loginServer:8003" as LS
+participant "chatServer:8004" as CS
+participant "roomServer:8005" as RS
+participant "Redis:6379" as R
+database "MySQL" as DB
 
-C -> LS: POST /api/login\n{username, password}
-activate LS
-LS -> DB: SELECT * FROM users WHERE username=?
-DB --> LS: User{uid, password(bcrypt)}
-LS -> LS: verifyPassword(bcrypt) ✅
-LS -> R: StoreSession({uid, username})\n→ SET sess:{token} = json\nEX 72h
-R --> LS: "tk_a59f..."
-LS -> LS: LoadInventory(user.uid)\n从 MySQL 加载道具进 Redis
-LS -> DB: SELECT * FROM user_items WHERE uid=?
-DB --> LS: []
-LS --> C: 200 OK\n{"token":"tk_a59f...", "uid":"u_001"}
-deactivate LS
-
-' ═══════════════════════════════════════
-'  Part 2: WS 连 chatServer（token 自动鉴权）
-' ═══════════════════════════════════════
-== Part 2: WebSocket 连 chatServer ==
-
-C -> CS: ws://127.0.0.1:8004?token=tk_a59f...
-activate CS
-CS -> CS: HTTP → WebSocket Upgrade
-CS -> R: GetSession("tk_a59f...")
-R --> CS: {uid:"u_001", username:"admin"}
-CS -> CS: SetProperty("uid", u_001)
-CS -> R: BindUser(u_001, "ws://127.0.0.1:8004")
-R --> CS: OK (分布式锁)
-CS -> CS: ConnManager.Register + BindUid
-CS --> C: 101 Switching Protocols
-CS -> C: Push auth.ok\n{"uid":"u_001", "username":"admin"}
-deactivate CS
-
-' ═══════════════════════════════════════
-'  Part 3: 世界频道聊天（跨服广播）
-' ═══════════════════════════════════════
-== Part 3: 世界频道聊天 (跨服广播) ==
-
-C -> CS: {"name":"chat.world.send", "msg":{"content":"大家好"}}
-activate CS
-CS -> CS: GetAuthInfo → uid="u_001" ✅
-CS -> CS: ConnManager.BroadcastAll()
-
-par 本机推送
-  CS -> CS: Broadcast("chat.world.new", msg)
-  CS -> C: Push chat.world.new {from:"admin", content:"大家好"}
-end
-
-par 跨服推送 (Redis Pub/Sub)
-  CS -> R: PUBLISH node:broadcast\n{action:"broadcast", fromNode:"ws://...8004", data:msg}
-  R -> LS: SubscribeRemoteBroadcast 收到
-  LS -> LS: Broadcast("chat.world.new", msg)
-  LS -> LS: 推给本机所有已连接的 uid
-end
-
-deactivate CS
-
-' ═══════════════════════════════════════
-'  Part 4: 道具添加（Redis Lua + 定时保存）
-' ═══════════════════════════════════════
-== Part 4: 道具操作 (Redis Lua 原子 + 定时保存) ==
-
-C -> LS: {"name":"inventory.add", "msg":{"itemId":"sword_001", "count":5}}
-activate LS
-LS -> LS: GetAuthInfo → uid="u_001" ✅
-LS -> LS: GetItemCount("u_001", "sword_001")
-
-alt Redis 有值
-  LS -> R: HGET inventory:u_001 sword_001
-  R --> LS: "3" (当前库存)
-else Redis 没有
-  LS -> R: HGET → redis.Nil
-  LS -> DB: SELECT * FROM user_items WHERE uid=? AND item_id=?
-  DB --> LS: NULL
-  LS -> R: HSET inventory:u_001 sword_001 0
-end
-
-LS -> R: **Lua EVAL** (原子)\nHINCRBY inventory:u_001 sword_001 5\nSADD dirty:uids u_001
-R --> LS: 8 (新数量)
-LS -> C: {"code":0, "msg":{"itemId":"sword_001", "count":8}}
-
-' 日志写入 (异步 goroutine)
-LS -> DBLog: INSERT INTO item_op_log\n(uid, item_id, op_type, count, before_count, after_count, source)
-note right: logWg.Add(1) 跟踪\n3s 超时保护
-deactivate LS
-
-' ═══════════════════════════════════════
-'  Part 5: 定时保存后台协程
-' ═══════════════════════════════════════
-== Part 5: 30s 定时保存后台协程 ==
-
-loop 每 30 秒
-  LS -> R: SMEMBERS dirty:uids
-  R --> LS: ["u_001", "u_002", ...]
-  
-  par 并发 10 个 goroutine
-    LS -> R: HGETALL inventory:u_001
-    R --> LS: {"sword_001":"8", ...}
-    LS -> DB: REPLACE INTO user_items\n批量写入 (事务)
-    LS -> R: SREM dirty:uids u_001
-  end
-end
-
-' ═══════════════════════════════════════
-'  Part 6: 优雅关闭
-' ═══════════════════════════════════════
-== Part 6: Ctrl+C 优雅关闭 (graceful shutdown) ==
-
-C -> C: (无操作，服务端退出)
-note over LS
-  Ctrl+C / SIGTERM 信号
-  gracefulShutdown() 触发:
-  
-  ① Broadcast("server_shutdown")
-  ② Sleep 300ms 等消息发完
-  ③ Close 所有 WebSocket 连接
-  ④ net.WaitHandlers() ← 等正在执行的 handler
-  ⑤ inventory.Shutdown() ← 强制保存所有 dirty UID
-  ⑥ invDAO.WaitLogWrites() ← 等日志写完
-  ⑦ os.Exit(0)
+' Background registration (once at startup, not part of login)
+note over GW,RS
+  Background: Once at startup:
+  loginServer registers type=login
+  chatServer registers type=chat
+  roomServer registers type=room
+  broker registers type=broker
+  Every 5s heartbeat to gateway
 end note
 
-LS -> LS: ③ Close → CloseAll
-LS -> LS: ④ WaitHandlers()
-LS -> R: ⑤ SMEMBERS dirty:uids
-R --> LS: ["u_001", ...]
-LS -> DB: REPLACE INTO user_items (强制保存)
-LS -> LS: ⑥ WaitLogWrites()
-LS -> DBLog: (等所有 InsertSafe 完成)
-LS -> C: (连接关闭)
+' =============================================================
+'  PATH A: HTTP login + direct WS connect
+' =============================================================
+
+== Path A: HTTP Login ==
+
+C -> LS: POST /api/login {username, password}
+activate LS
+LS -> DB: SELECT * FROM users WHERE username=?
+alt User exists
+  DB --> LS: User{uid, bcryptPassword}
+  LS -> LS: verifyPassword bcrypt.CompareHashAndPassword
+  alt Password OK
+    LS -> R: StoreSession SET sess token EX 24h
+    R --> LS: token
+    LS -> DB: SELECT * FROM user_items WHERE uid=?
+    DB --> LS: items
+    LS -> R: LoadInventory HSET inventory:{uid}
+    LS --> C: 200 OK {code:0, token, uid, username, items}
+  else Password wrong
+    LS --> C: 401 errMsg=Password error
+  end
+else User not exists
+  DB --> LS: nil
+  LS --> C: 404 errMsg=User not found
+end
+deactivate LS
+
+' Step A2: Client connects to each backend WS (token auto-auth)
+== Path A2: Direct WS Connect ==
+
+C -> LS: WS connect with token
+activate LS
+LS -> LS: Check MaxConns
+LS -> LS: wsUpgrader.Upgrade
+LS -> R: GetSession
+R --> LS: uid username
+LS -> LS: SetProperty
+LS -> LS: BindUid skipRedis true
+LS -> LS: ConnManager.Register
+LS -> LS: wsServer.Start
+LS -> C: 101 Switching Protocols
+LS -> C: Push auth.ok
+deactivate LS
+
+C -> CS: WS connect with token
+activate CS
+CS -> CS: Same auto auth flow Push auth.ok
+deactivate CS
+
+C -> RS: WS connect with token
+activate RS
+RS -> RS: Same auto auth flow Push auth.ok
+deactivate RS
+
+note right of C
+  Token already obtained via HTTP
+  WS auto-auth binds directly
+  account.login not needed
+end note
+
+' =============================================================
+'  PATH B: Gateway Broker Two-Stage Connection (Recommended)
+' =============================================================
+
+== Path B: Two-Stage Connection ==
+
+' Stage 0: HTTP login (same as Path A)
+== Path B Stage 0: HTTP login ==
+
+C -> LS: POST /api/login {username, password}
+activate LS
+LS -> DB: SELECT users WHERE username=?
+DB --> LS: User{uid, bcrypt}
+LS -> LS: verifyPassword OK
+LS -> R: StoreSession SET sess token EX 24h
+LS -> DB: SELECT user_items WHERE uid=?
+LS -> R: LoadInventory HSET inventory
+LS --> C: 200 OK token uid
+deactivate LS
+
+' Stage 1: Gateway dispatch - find a broker
+== Path B Stage 1: Gateway dispatch ==
+
+C -> GW: GET gateway dispatch uid token
+activate GW
+GW -> GW: Route broker RoundRobin
+GW --> C: broker_url returned
+deactivate GW
+
+' Stage 2: Broker parallel dial all backends
+== Path B Stage 2: Broker WS proxy ==
+
+C -> BR: WS connect with token
+activate BR
+
+note over BR
+  Broker parallel dials all 3 backends simultaneously
+end note
+
+group Channel 1: loginServer
+  BR -> GW: route for login
+  GW --> BR: addr loginServer
+  BR -> LS: WS Upgrade with token
+  LS -> R: GetSession
+  R --> LS: uid username
+  LS -> LS: BindUid Register Start
+  LS --> BR: 101 OK
+end
+
+group Channel 2: chatServer
+  BR -> GW: route for chat
+  GW --> BR: addr chatServer
+  BR -> CS: WS Upgrade with token
+  CS -> R: GetSession
+  R --> CS: uid username
+  CS -> CS: BindUid Register Start
+  CS --> BR: 101 OK
+end
+
+group Channel 3: roomServer
+  BR -> GW: route for room
+  GW --> BR: addr roomServer
+  BR -> RS: WS Upgrade with token
+  RS -> R: GetSession
+  R --> RS: uid username
+  RS -> RS: BindUid Register Start
+  RS --> BR: 101 OK
+end
+
+BR -> BR: backends.Store RCU atomic replace
+BR --> C: 101 Switching Protocols
+BR -> C: Push auth.ok
+deactivate BR
+
+' Stage 3: WS account.login on Broker
+== Path B Stage 3: WS account.login ==
+
+C -> BR: WSReq account.login
+activate BR
+BR -> BR: routeByName picks nodeType login
+BR -> LS: Forward WSReq
+activate LS
+LS -> DB: SELECT users WHERE username
+DB --> LS: User uid bcrypt
+LS -> LS: verifyPassword OK
+LS -> LS: BindUid skipRedis false
+LS -> R: SETNX lock bind uid EX 5s
+LS -> R: SET online user uid nodeAddr EX 30s
+LS -> R: DEL lock bind uid
+R --> LS: Lock acquired
+LS -> LS: Kick old conn if exists
+LS -> DB: SELECT user items WHERE uid
+DB --> LS: items
+LS -> R: LoadInventory HSET inventory
+LS -> R: StoreSession SET sess new token EX 24h
+LS --> BR: WSResp account.login resp
+deactivate LS
+BR -> BR: Dedup check 500ms
+BR -> C: BatchResp final response
+deactivate BR
+
+' Stage 4: Background heartbeat renewal
+note over LS,RS
+  [Background] StartHeartbeatLoop
+  Pipeline SET online user uid EX 30s
+  Every 10s renew, TTL 30s prevent lost
+end note
+
+' =============================================================
+'  Comparison
+' =============================================================
+
+== Comparison ==
+
+note over C,RS
+  === Path A (HTTP + Direct) ===
+  + Simple, good for single-node
+  - Client maintains 3 WS connections
+  - Connections x3 heartbeat x3 traffic x3
+
+  === Path B (Gateway Broker) ===
+  + Client maintains 1 WS only
+  + Broker RCU lockless routing by message prefix
+  + Auto reconnect on backend failure
+  + Fan-in dedup and BatchResp merge
+  - One extra hop, but Broker is very lightweight
+end note
 
 @enduml

@@ -9,9 +9,10 @@ type LoginReq struct {
 }
 
 type LoginResp struct {
-	Username string `json:"username"`
-	Token    string `json:"token"`
-	UId      string `json:"uid"`
+	Username string           `json:"username"`
+	Token    string           `json:"token"`
+	UId      string           `json:"uid"`
+	Items    map[string]int64 `json:"items"` // item_id → count；空背包返回 {}，不返回 null
 }
 
 // ──── 注册 ────

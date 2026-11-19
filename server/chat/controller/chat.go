@@ -39,7 +39,7 @@ func (c *Chat) sendWorld(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		return
 	}
 
-	uid, username := net.GetAuthInfo(req.Conn)
+	uid, username := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -61,7 +61,7 @@ func (c *Chat) sendWorld(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		Timestamp: time.Now().Unix(),
 	}
 
-	log.Info("[Chat] world", "from", username, "msgId", msg.MsgId, "content", truncate(body.Content, 30))
+	// 本机 + 跨服广播（BroadcastAll 内部已包含 PublishBroadcast）
 	net.ConnManager.BroadcastAll("chat.world.new", msg)
 
 	rsp.Body.Code = 0
@@ -81,7 +81,7 @@ func (c *Chat) sendPrivate(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		return
 	}
 
-	uid, username := net.GetAuthInfo(req.Conn)
+	uid, username := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -110,7 +110,9 @@ func (c *Chat) sendPrivate(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		Timestamp: time.Now().Unix(),
 	}
 
-	log.Info("[Chat] private", "from", username, "to", body.ToUid, "online", found)
+	// 热路径：不再打 Info 日志（3000+ QPS 下每条 IO 是瓶颈）
+	// 如需统计 online 比例，用 metrics 或临时开 Debug
+	log.Debug("[Chat] private", "from", username, "to", body.ToUid, "online", found)
 	if found {
 		net.ConnManager.PushToUid(body.ToUid, "chat.private.new", msg)
 	}
@@ -132,7 +134,7 @@ func (c *Chat) sendGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		return
 	}
 
-	uid, username := net.GetAuthInfo(req.Conn)
+	uid, username := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -173,7 +175,7 @@ func (c *Chat) sendGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "chat.group.new", msg)
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
 		Action: "group",
-		UID:    body.GroupId,
+		Target: body.GroupId,
 		Name:   "chat.group.new",
 		Data:   msg,
 	})
@@ -194,7 +196,7 @@ func (c *Chat) joinGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	uid, username := net.GetAuthInfo(req.Conn)
+	uid, username := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -221,7 +223,7 @@ func (c *Chat) joinGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	}
 	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "group.notice", notice)
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
-		Action: "group", UID: body.GroupId, Name: "group.notice", Data: notice,
+		Action: "group", Target: body.GroupId, Name: "group.notice", Data: notice,
 	})
 
 	rsp.Body.Code = 0
@@ -244,7 +246,7 @@ func (c *Chat) leaveGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 		rsp.Body.Msg = map[string]string{"errMsg": "参数解析失败"}
 		return
 	}
-	uid, username := net.GetAuthInfo(req.Conn)
+	uid, username := net.GetAuthInfoFromReq(req)
 	if uid == "" {
 		rsp.Body.Code = -1
 		rsp.Body.Msg = map[string]string{"errMsg": "请先登录"}
@@ -270,7 +272,7 @@ func (c *Chat) leaveGroup(req *net.WsMsgReq, rsp *net.WsMsgResp) {
 	}
 	net.ConnManager.PushToLocalGroupMembers(body.GroupId, "group.notice", notice)
 	rediscache.PublishBroadcast(rediscache.BroadcastMsg{
-		Action: "group", UID: body.GroupId, Name: "group.notice", Data: notice,
+		Action: "group", Target: body.GroupId, Name: "group.notice", Data: notice,
 	})
 
 	rsp.Body.Code = 0

@@ -10,6 +10,86 @@
  */
 
 const readline = require('readline');
+const path = require('path');
+const protobuf = require('protobufjs');
+
+// Protobuf 动态加载 proto/ws.proto
+const pbRoot = protobuf.loadSync(path.join(__dirname, 'proto', 'ws.proto'));
+const WSReq  = pbRoot.lookupType('ws.WSReq');
+const WSResp = pbRoot.lookupType('ws.WSResp');
+
+// ── name → oneof 字段名映射表 ──
+// protobufjs 动态加载会把 proto snake_case 自动转成 camelCase
+const nameToOneofField = {
+    'account.login':     'accountLogin',
+    'account.register':  'accountRegister',
+    'chat.world.send':   'chatWorldSend',
+    'chat.private.send': 'chatPrivateSend',
+    'chat.group.send':   'chatGroupSend',
+    'chat.group.join':   'groupMemberReq',
+    'chat.group.leave':  'groupMemberReq',
+    'chat.group.members':'groupMemberReq',
+    'room.create':       'roomCreate',
+    'room.join':         'roomJoin',
+    'room.leave':        'roomLeave',
+    'room.kick':         'roomKick',
+    'room.delete':       'roomDelete',
+    'room.send':         'roomSend',
+};
+
+const respOneofFieldToName = {
+    'accountLoginResp':    'account.login',
+    'accountRegisterResp': 'account.register',
+    'chatWorldNew':        'chat.world.new',
+    'chatPrivateNew':      'chat.private.new',
+    'chatGroupNew':        'chat.group.new',
+    'groupMemberResp':     'chat.group.members',
+    'chatOnlineResp':      'chat.online.get',
+    'roomCreateResp':      'room.create',
+    'roomJoinResp':        'room.join',
+    'roomChatNew':         'room.chat.new',
+    'roomNotice':          'room.notice',
+    'systemBroadcast':     'system.broadcast',
+    'systemPush':          'system.push',
+};
+
+// 发消息：优先 oneof typed message；兜底 msg_json
+function encodeMsg(seq, name, msg = {}) {
+    const payload = { seq: seq || 0, name };
+    const oneofField = nameToOneofField[name];
+    if (oneofField) {
+        payload[oneofField] = msg;
+    } else {
+        payload.msgJson = JSON.stringify(msg);
+    }
+    return WSReq.encode(WSReq.create(payload)).finish();
+}
+
+// 收消息：优先从 oneof 取 typed message；兜底 msg_json
+function decodeMsg(buf) {
+    const p = WSResp.decode(buf);
+    let msg = null, oneofName = null;
+    const msgOneof = WSResp.oneofs.msg;
+    if (msgOneof) {
+        for (const member of msgOneof.oneof) {
+            if (p[member] != null && p[member] !== undefined) {
+                msg = p[member];
+                oneofName = respOneofFieldToName[member];
+                break;
+            }
+        }
+    }
+    if (msg == null && p.msgJson) {
+        try { msg = JSON.parse(p.msgJson); } catch {}
+    }
+    return {
+        seq: Number(p.seq),
+        name: oneofName || p.name,
+        code: p.code,
+        msg: msg || {}
+    };
+}
+
 let WebSocket;
 try {
     WebSocket = require('ws');
@@ -25,10 +105,21 @@ try {
 // ═══════════════════════════════════════════════
 //  配置
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  WS 连接模式开关
+//   false = 范式 A：直连 Gateway /ws  （Gateway 同时做分发和代理，当前稳定模式）
+//   true  = 范式 B：先 HTTP dispatch → 再连 Broker /ws  （Gateway 纯分发，Broker 纯代理）
+// ═══════════════════════════════════════════════
+const BROKER_MODE = true;
+
+// 范式 A：Gateway 直连模式
 const SERVER_PRESETS = {
-    login: 'ws://127.0.0.1:8003',
-    chat:  'ws://127.0.0.1:8004'
+    login: 'ws://127.0.0.1:9000/ws',
+    chat:  'ws://127.0.0.1:9000/ws',
+    room:  'ws://127.0.0.1:9000/ws'
 };
+const GATEWAY_HTTP = 'http://127.0.0.1:9000';
+const BROKER_HTTP  = 'http://127.0.0.1:9001';
 
 // ═══════════════════════════════════════════════
 //  解析命令行参数
@@ -64,9 +155,57 @@ function buildWsUrl(presetOrUrl, token) {
     return url;
 }
 
+// httpGet 用 Node 内置 http 模块发 GET（兼容所有 Node 版本）
+function httpGet(url) {
+    return new Promise((resolve, reject) => {
+        try {
+            const u = new URL(url);
+            const http = require(u.protocol === 'https:' ? 'https' : 'http');
+            const req = http.request({
+                hostname: u.hostname,
+                port: u.port || (u.protocol === 'https:' ? 443 : 80),
+                path: u.pathname + u.search,
+                method: 'GET'
+            }, (res) => {
+                let raw = '';
+                res.on('data', chunk => raw += chunk);
+                res.on('end', () => resolve(raw));
+            });
+            req.on('error', reject);
+            req.end();
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+// dispatchBroker GET /gateway/dispatch?uid=xxx&token=tk_xxx
+// 范式 B 两阶段连接：先 HTTP 拿 broker 地址，再 WS 连 Broker
+async function dispatchBroker(uid, token) {
+    const params = new URLSearchParams();
+    if (uid)   params.set('uid', uid);
+    if (token) params.set('token', token);
+    const url = `${GATEWAY_HTTP}/gateway/dispatch?${params.toString()}`;
+    const raw = await httpGet(url);
+    const data = JSON.parse(raw);
+    if (data.code !== 0) throw new Error(data.msg || 'dispatch failed');
+    return data.broker_url;
+}
+
+// resolveWsUrl 统一入口：BROKER_MODE 下走 dispatch，否则直连
+async function resolveWsUrl(preset, uid, token) {
+    if (BROKER_MODE) {
+        return await dispatchBroker(uid, token);
+    }
+    return buildWsUrl(preset, token);
+}
+
 const opts = parseArgs(args);
-const WS_URL = buildWsUrl(opts.server, opts.token);
-let savedToken = opts.token; // 保存 token，switch 到 chatServer 时自动带上
+let savedToken = opts.token;
+
+// 全局（startRepl/crosstest 通过闭包访问）
+let WS_URL = '';
+let ws = null;
 
 // ═══════════════════════════════════════════════
 //  状态
@@ -81,38 +220,44 @@ function nextSeq() { return ++seq; }
 //  发消息封装
 // ═══════════════════════════════════════════════
 function send(ws, name, msg = {}) {
-    const payload = JSON.stringify({ seq: nextSeq(), name, msg });
+    const seq = nextSeq();
     console.log(`📤 → ${name}`, JSON.stringify(msg));
-    ws.send(payload);
+    ws.send(encodeMsg(seq, name, msg));
 }
 
 // ═══════════════════════════════════════════════
-//  连接
+//  主入口（async 支持范式 B dispatch）
 // ═══════════════════════════════════════════════
-console.log('========================================');
-console.log('  mssgServer WebSocket 测试客户端');
-console.log(`  连接: ${WS_URL}`);
-console.log('========================================');
-
-const ws = new WebSocket(WS_URL);
-
-ws.onopen = () => {
-    console.log('✅ 连接成功\n');
-
-    // 如果带了 --username 参数，自动登录
-    if (opts.username && opts.password) {
-        console.log(`🔄 自动登录: ${opts.username}`);
-        send(ws, 'account.login', { username: opts.username, password: opts.password });
-        // 等登录响应后再进入交互
-        setTimeout(startRepl, 500);
-    } else {
-        startRepl();
-    }
-};
-
-ws.onmessage = (event) => {
+async function main() {
     try {
-        const data = JSON.parse(event.data);
+        WS_URL = await resolveWsUrl(opts.server, '', opts.token);
+        console.log('🔗 WS URL:', WS_URL, BROKER_MODE ? '(via dispatch)' : '(direct)');
+    } catch (e) {
+        console.error('❌ resolve WS URL failed:', e.message);
+        process.exit(1);
+    }
+
+    console.log('========================================');
+    console.log('  mssgServer WebSocket 测试客户端');
+    console.log(`  连接: ${WS_URL}`);
+    console.log('========================================');
+
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+        console.log('✅ 连接成功\n');
+        if (opts.username && opts.password) {
+            console.log(`🔄 自动登录: ${opts.username}`);
+            send(ws, 'account.login', { username: opts.username, password: opts.password });
+            setTimeout(startRepl, 500);
+        } else {
+            startRepl();
+        }
+    };
+
+    ws.onmessage = (event) => {
+    try {
+        const data = decodeMsg(event.data);
         // 登录响应自动缓存 uid + token
         if (data.name === 'account.login' && data.code === 0 && data.msg) {
             currentUId = data.msg.uid || '';
@@ -206,18 +351,387 @@ ws.onmessage = (event) => {
             console.log('   ', formatted);
         }
     } catch (e) {
-        console.log('📥 ← 原始:', event.data);
+        console.log('📥 ← 原始(hex):', Buffer.isBuffer(event.data) ? event.data.toString('hex').substring(0, 100) : event.data);
     }
 };
 
-ws.onclose = (code, reason) => {
-    console.log(`\n🔌 连接关闭 (code=${code})`);
-    process.exit(0);
-};
+    ws.onclose = (code, reason) => {
+        console.log(`\n🔌 连接关闭 (code=${code})`);
+        process.exit(0);
+    };
 
-ws.onerror = (err) => {
-    console.error('❌ 错误:', err.message || err);
-};
+    ws.onerror = (err) => {
+        console.error('❌ 错误:', err.message || err);
+    };
+
+} // end main()
+
+main().catch(e => console.error('💥 fatal:', e.message));
+
+// ═══════════════════════════════════════════════
+//  跨服自动化测试
+// ═══════════════════════════════════════════════
+// 保持架构干净：chatServer 只做 chat，不注册 login/room 路由
+// 跨服测试验证三层能力：
+//   ① Redis 跨服务 session（token 自动鉴权）
+//   ② Redis Pub/Sub 跨服广播链路
+//   ③ Gateway admin HTTP 接口（触发跨服 push/broadcast/kick）
+//
+// 测试流程：
+//   1. A 在 loginServer 注册+登录 → 拿到 tokenA
+//   2. B 也在 loginServer 注册+登录 → 拿到 tokenB
+//   3. B 断开 → 用 tokenB 连 chatServer → token 自动鉴权成功（Redis session 跨服务 ✅）
+//   4. Gateway admin/push → 推给 B → B 收到（跨服 Pub/Sub push ✅）
+//   5. Gateway admin/broadcast → 全服广播 → A 和 B 都收到（跨服 broadcast ✅）
+//   6. Gateway admin/kick → 踢 A → A 被踢下线（跨服 kick ✅）
+//
+// 依赖：Redis + loginServer(8003) + chatServer(8004) + Gateway(9000) 都在跑
+
+// 用 Node 内置 http 模块发 POST（兼容旧 Node 版本）
+function httpPost(url, body) {
+    return new Promise((resolve, reject) => {
+        try {
+            const u = new URL(url);
+            const http = require(u.protocol === 'https:' ? 'https' : 'http');
+            const data = JSON.stringify(body);
+            const req = http.request({
+                hostname: u.hostname,
+                port: u.port || (u.protocol === 'https:' ? 443 : 80),
+                path: u.pathname + u.search,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(data)
+                }
+            }, (res) => {
+                let raw = '';
+                res.on('data', chunk => raw += chunk);
+                res.on('end', () => resolve(raw));
+            });
+            req.on('error', reject);
+            req.write(data);
+            req.end();
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+async function gatewayAdmin(route, body) {
+    return await httpPost(`${GATEWAY_HTTP}${route}`, body);
+}
+
+function runCrossServerTest() {
+    console.log('\n╔══════════════════════════════════════════════╗');
+    console.log('║     🔄 跨服自动化测试 (Cross-Server Test)      ║');
+    console.log('╚══════════════════════════════════════════════╝\n');
+
+    let step = 0;
+    const passed = [];
+    const failed = [];
+    function ok(name) { passed.push(name); console.log(`  ✅ Step ${++step}: ${name}`); }
+    function fail(name, err) { failed.push({name, err}); console.log(`  ❌ Step ${++step}: ${name} — ${err}`); }
+
+    const now = Date.now().toString().slice(-6);
+    const userA = `crossA_${now}`;
+    const passA = '123456';
+    const userB = `crossB_${now}`;
+    const passB = '123456';
+
+    let connA, connB;
+    let uidA = '', uidB = '', tokenA = '', tokenB = '';
+
+    function makeConn(url, label) {
+        return new Promise((resolve, reject) => {
+            const c = new WebSocket(url);
+            c._label = label;
+            c._pending = {};
+            c.onopen = () => resolve(c);
+            c.onerror = (e) => reject(new Error(`${label} connect failed: ${e.message || e}`));
+            c.onmessage = (event) => {
+                try {
+                    const data = decodeMsg(event.data);
+                    if (!c._pending[data.name]) c._pending[data.name] = [];
+                    c._pending[data.name].push(data);
+                } catch (e) {}
+            };
+        });
+    }
+
+    function sendAndWait(c, name, body, expectedResponseName = null, timeout = 2000) {
+        return new Promise((resolve) => {
+            const mySeq = ++seq;
+            c.send(encodeMsg(mySeq, name, body));
+
+            if (!expectedResponseName) {
+                setTimeout(() => resolve(null), timeout);
+                return;
+            }
+
+            // 先发请求，再清空旧 pending（防止拿到上一次的残留）
+            c._pending[expectedResponseName] = [];
+
+            const start = Date.now();
+            const interval = setInterval(() => {
+                const msgs = c._pending[expectedResponseName];
+                if (msgs && msgs.length > 0) {
+                    const last = msgs[msgs.length - 1];
+                    c._pending[expectedResponseName] = []; // 消费后清空
+                    clearInterval(interval);
+                    resolve(last);
+                    return;
+                }
+                if (Date.now() - start > timeout) {
+                    clearInterval(interval);
+                    // 超时也清掉残留
+                    c._pending[expectedResponseName] = [];
+                    resolve(null);
+                }
+            }, 100);
+        });
+    }
+
+    async function run() {
+        try {
+            // ═══════ 1. 连接 A → Gateway（智能路由）═══════
+            console.log('\n📡 [1/6] 连接 A → ' + (BROKER_MODE ? 'Gateway dispatch → Broker' : 'Gateway (9000)'));
+            try {
+                const urlA = await resolveWsUrl('login', '', '');
+                connA = await makeConn(urlA, 'A');
+                ok('A 连接 Gateway 成功 — Gateway 智能路由已就绪 ✅');
+            } catch (e) {
+                fail('A 连接 Gateway', e.message);
+                throw new Error('无法继续，Gateway 可能没启动');
+            }
+
+            // ═══════ 2. 连接 B → Gateway（智能路由）═══════
+            console.log('📡 [2/6] 连接 B → ' + (BROKER_MODE ? 'Gateway dispatch → Broker' : 'Gateway (9000)'));
+            try {
+                const urlB = await resolveWsUrl('chat', '', '');
+                connB = await makeConn(urlB, 'B');
+                ok('B 连接 Gateway 成功 — 两路独立 WS 代理连接 ✅');
+            } catch (e) {
+                fail('B 连接 Gateway', e.message);
+                throw new Error('无法继续，Gateway 可能没启动');
+            }
+
+            // ═══════ 3. A 注册 + 登录 ═══════
+            console.log('\n🔐 [3/6] A 注册并登录');
+            await sendAndWait(connA, 'account.register', { username: userA, password: passA }, 'account.register');
+            let loginRsp = await sendAndWait(connA, 'account.login', { username: userA, password: passA }, 'account.login');
+            if (!loginRsp || loginRsp.code !== 0) {
+                loginRsp = await sendAndWait(connA, 'account.login', { username: userA, password: passA }, 'account.login');
+            }
+            if (loginRsp && loginRsp.code === 0 && loginRsp.msg) {
+                uidA = loginRsp.msg.uid || '';
+                tokenA = loginRsp.msg.token || '';
+                ok(`A 登录成功 uid=${uidA}（Gateway → loginServer ✅）`);
+            } else {
+                fail('A 登录', loginRsp?.msg?.errMsg || 'unknown');
+                throw new Error('无法继续');
+            }
+
+            // ═══════ 3.5 ⭐ Gateway WS 智能路由核心验证（同一条 WS 连三个后端）═══════
+            console.log('\n🧠 [3.5] Gateway WS 智能路由核心验证 — 单 WS 连接代理 login + room + chat');
+            const testRoomName = `gw_room_${now}`;
+            let roomId = '';
+
+            // 3.5a: room.create → Gateway 路由到 roomServer
+            console.log('  ├─ 3.5a. room.create → Gateway → roomServer');
+            const createRsp = await sendAndWait(connA, 'room.create', { name: testRoomName, max_size: 10 }, 'room.create', 3000);
+            if (createRsp && createRsp.code === 0 && createRsp.msg) {
+                roomId = createRsp.msg.room_id || '';
+                ok(`room.create 成功 roomId=${roomId}（Gateway → roomServer ✅）`);
+            } else {
+                // roomServer 可能没启动，跳过但不报错
+                console.log('  ⚠️ room.create 失败，可能 roomServer 没启动，跳过 room 路由验证');
+            }
+
+            // 3.5b: chat.world.send → Gateway 路由到 chatServer
+            console.log('  └─ 3.5b. chat.world.send → Gateway → chatServer');
+            const chatRsp = await sendAndWait(connA, 'chat.world.send', { content: `Gateway智能路由测试 ${now}` }, 'chat.world.send', 3000);
+            if (chatRsp && chatRsp.code === 0) {
+                ok(`chat.world.send 成功（Gateway → chatServer ✅）`);
+            } else {
+                console.log('  ⚠️ chat.world.send 失败，可能 chatServer 没启动');
+            }
+
+            // ═══════ 4. B 也注册+登录（必须走 connB！不是 connA！）═══════
+            console.log('\n🔐 [4/6] B 注册并登录（走 connB 拿 tokenB）');
+            await sendAndWait(connB, 'account.register', { username: userB, password: passB }, 'account.register');
+            let loginRspB = await sendAndWait(connB, 'account.login', { username: userB, password: passB }, 'account.login', 3000);
+            if (!loginRspB || loginRspB.code !== 0) {
+                loginRspB = await sendAndWait(connB, 'account.login', { username: userB, password: passB }, 'account.login', 3000);
+            }
+            if (loginRspB && loginRspB.code === 0 && loginRspB.msg) {
+                uidB = loginRspB.msg.uid || '';
+                tokenB = loginRspB.msg.token || '';
+                ok(`B 登录成功 uid=${uidB}`);
+            } else {
+                fail('B 登录', loginRspB?.msg?.errMsg || 'unknown');
+                throw new Error('无法继续');
+            }
+
+            // ═══════ 5. B 断开 → 用 tokenB 重连 Gateway ═══════
+            console.log('\n🔄 [5/6] B 断开 Gateway，用 tokenB 重连（验证做法 A: Broker 消息注入 uid + Redis session）');
+            connB.close();
+            await new Promise(r => setTimeout(r, 300));
+
+            try {
+                const urlB2 = await resolveWsUrl('chat', uidB, tokenB);
+                connB = await makeConn(urlB2, 'B');
+                // 做法 A: Broker dialAll 永不带 token → 后端 URL 无 token → 不会发 auth.ok
+                // 鉴权靠 Broker 从 login 响应拿 uid，后续注入到业务消息的 __uid 字段
+                // 这里需要 B 在新 session 里重新 login，让 Broker 存 uid
+                console.log('   └─ B 重连后重新 login（做法 A: token 只在 login handler 验证）');
+                await sendAndWait(connB, 'account.register', { username: userB, password: passB }, 'account.register', 3000);
+                const loginRspB2 = await sendAndWait(connB, 'account.login', { username: userB, password: passB }, 'account.login', 3000);
+                if (loginRspB2 && loginRspB2.code === 0) {
+                    // 验证 Broker 确实存了 uid：发一条 chat.world.send，如果 Broker 注入了 __uid
+                    // chatServer handler 能读到 from_uid，返回的响应应该 code=0
+                    const pingRsp = await sendAndWait(connB, 'chat.world.send', { content: 'ping-uid-check' }, 'chat.world.send', 3000);
+                    if (pingRsp && pingRsp.code === 0) {
+                        ok(`B 重连后 login + world.send 成功 — Broker 跨 session 注入 uid OK ✅`);
+                    } else {
+                        fail('B world.send', pingRsp?.msg?.errMsg || 'Broker 可能没注入 uid');
+                    }
+                } else {
+                    fail('B 重连后 login', loginRspB2?.msg?.errMsg || 'unknown');
+                }
+            } catch (e) {
+                fail('B token 重连', e.message);
+                throw new Error('无法继续，Gateway/Redis 可能没启动');
+            }
+
+            // 等 Pub/Sub 订阅就绪
+            await new Promise(r => setTimeout(r, 500));
+
+            // ═══════ 6. 跨服 Gateway admin HTTP 接口测试 ═══════
+            console.log('\n🧪 [6/6] Gateway admin HTTP 接口跨服测试');
+
+            // 给 connA/connB 加动态消息监听
+            let bReceivedPush = false, aKicked = false;
+            const origB = connB.onmessage;
+            connB.onmessage = (event) => {
+                try {
+                    const d = decodeMsg(event.data);
+                    if (d.name === 'system.push') {
+                        bReceivedPush = true;
+                        console.log(`     📥 B 收到 admin/push`);
+                    }
+                    if (origB) origB(event);
+                } catch (e) {}
+            };
+            const origCloseA = connA.onclose;
+            connA.onclose = () => { aKicked = true; if (origCloseA) origCloseA(); };
+
+            // 6a: admin/push → B
+            console.log('\n  ├─ 6a. POST /admin/push → 跨服推给 B');
+            try {
+                await gatewayAdmin('/admin/push', {
+                    uid: uidB,
+                    name: 'system.push',
+                    data: { from: 'gateway', content: `hello-${now}` }
+                });
+                await new Promise(r => setTimeout(r, 800));
+                if (bReceivedPush) {
+                    ok('B 收到 admin/push — 跨服 Pub/Sub push ✅');
+                } else {
+                    fail('admin/push → B', 'B 没收到');
+                }
+            } catch (e) {
+                fail('admin/push', `Gateway 可能没启动: ${e.message}`);
+            }
+
+            // 6b: admin/broadcast → A + B
+            let aBC = false, bBC = false;
+            const origA = connA.onmessage;
+            connA.onmessage = (event) => {
+                try {
+                    const d = decodeMsg(event.data);
+                    if (d.name === 'system.broadcast') aBC = true;
+                    if (origA) origA(event);
+                } catch (e) {}
+            };
+            const origB2 = connB.onmessage;
+            connB.onmessage = (event) => {
+                try {
+                    const d = decodeMsg(event.data);
+                    if (d.name === 'system.broadcast') bBC = true;
+                    if (origB2) origB2(event);
+                } catch (e) {}
+            };
+
+            console.log('  ├─ 6b. POST /admin/broadcast → 全服广播');
+            try {
+                await gatewayAdmin('/admin/broadcast', {
+                    name: 'system.broadcast',
+                    data: { from: 'gateway', content: `world-${now}` }
+                });
+                await new Promise(r => setTimeout(r, 800));
+                if (aBC && bBC) {
+                    ok('A 和 B 都收到全服广播 — 跨服 Pub/Sub broadcast ✅');
+                } else {
+                    fail('admin/broadcast', `A=${aBC} B=${bBC}`);
+                }
+            } catch (e) {
+                fail('admin/broadcast', `Gateway 可能没启动: ${e.message}`);
+            }
+
+            // 6c: admin/kick → A
+            console.log('  └─ 6c. POST /admin/kick → 跨服踢 A');
+            try {
+                await gatewayAdmin('/admin/kick', { uid: uidA });
+                await new Promise(r => setTimeout(r, 1000));
+                if (aKicked) {
+                    ok('A 被踢下线 — 跨服 Pub/Sub kick ✅');
+                } else {
+                    fail('admin/kick → A', 'A 没被踢下线');
+                }
+            } catch (e) {
+                fail('admin/kick', `Gateway 可能没启动: ${e.message}`);
+            }
+
+            // ═══════ 汇总 ═══════
+            console.log('\n╔══════════════════════════════════════════════╗');
+            console.log('║                 📊 测试结果汇总               ║');
+            console.log('╠══════════════════════════════════════════════╣');
+            console.log('║  🧪 架构：Gateway 智能路由（客户端永远只连一个 WS）');
+            console.log('║  🧪 路由表：account→login  room→room  chat→chat  group→chat');
+            console.log('║  🧪 同一条 WS 同时操作 login + room + chat（无需 switch！）');
+            console.log('║  🧪 跨服：Redis session + Redis Pub/Sub');
+            console.log('╠══════════════════════════════════════════════╣');
+            passed.forEach(p => console.log(`║  ✅ ${p}`));
+            failed.forEach(f => console.log(`║  ❌ ${f.name} — ${f.err}`));
+            console.log('╠══════════════════════════════════════════════╣');
+            if (failed.length === 0) {
+                console.log(`║  🎉 全部通过！(${passed.length}项) 跨服链路完全 OK`);
+            } else {
+                console.log(`║  ⚠️  通过 ${passed.length}/${passed.length + failed.length} 项`);
+            }
+            console.log('╚══════════════════════════════════════════════╝\n');
+
+            if (failed.length > 0) {
+                console.log('💡 排错提示：');
+                if (failed.some(f => f.name.includes('Gateway'))) {
+                    console.log('   → Gateway(9000) 可能没启动: go run gatewayServer.go');
+                }
+                console.log('   → Redis(6379) 必须在跑');
+                console.log('   → Gateway(9000) + loginServer(8003) + chatServer(8004) + roomServer(8005) 都要启动');
+            }
+        } catch (e) {
+            console.log('💥 测试异常:', e.message);
+            console.log('💡 请确认：Redis + Gateway(9000) + loginServer(8003) + chatServer(8004) + roomServer(8005) 都在运行\n');
+        } finally {
+            try { connA?.close(); } catch(e) {}
+            try { connB?.close(); } catch(e) {}
+        }
+    }
+
+    run();
+}
+  
+
 
 // ═══════════════════════════════════════════════
 //  交互式命令行
@@ -254,6 +768,12 @@ function printHelp() {
 
   ─── 在线 ───
   online                            查看本机在线用户
+
+  ─── 跨服测试 ───
+  crosstest                         自动化跨服测试（同时开2个连接，login+chat）
+
+  ─── 跨服测试 ───
+  crosstest                         自动化跨服测试（同时开2个连接，login+chat）
 
   ─── 管理 ───
   quit / exit                       退出
@@ -413,7 +933,7 @@ function startRepl() {
             case 'switch':
             case 'connect': {
                 // 快速切换到另一个 server（带上已保存的 token）
-                if (args.length < 1) { console.log('用法: switch <login|chat|ws://host:port>'); break; }
+                if (args.length < 1) { console.log('用法: switch <login|chat|room|ws://host:port>'); break; }
                 const newUrl = buildWsUrl(args[0], savedToken);
                 console.log(`🔄 切换到 ${newUrl}`);
                 // 重连（内联，修复 setupWsHandlers 未定义的 bug）
@@ -463,6 +983,12 @@ function startRepl() {
             case 'items':
                 if (!currentUId) { console.log('❌ 请先 login'); break; }
                 send(ws, 'inventory.get', {});
+                break;
+
+            // ──── 跨服自动化测试 ────
+            case 'crosstest':
+            case 'cross':
+                runCrossServerTest();
                 break;
 
             default:
