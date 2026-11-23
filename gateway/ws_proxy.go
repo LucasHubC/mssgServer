@@ -154,6 +154,7 @@ type NodeProvider interface {
 //	旧 map 无人引用后被 GC 回收，无锁、无竞态、读写都高效
 type proxySession struct {
 	backends atomic.Pointer[map[string]*websocket.Conn]
+	done     chan struct{} // 🔴 client WS 断开信号，close 时触发
 
 	// mu 保护：uid/username、lastForwarded、token（写极少）
 	mu              sync.Mutex
@@ -222,6 +223,7 @@ func newProxySession(service string, client *websocket.Conn, np NodeProvider, no
 		nodeTypes:     nodeTypes,
 		token:         token,
 		lastForwarded: make(map[string]time.Time),
+		done:          make(chan struct{}),
 	}
 	empty := make(map[string]*websocket.Conn)
 	ps.backends.Store(&empty)
@@ -456,6 +458,7 @@ func dialBackend(addr, token string) (*websocket.Conn, error) {
 // proxyClientToBackend 客户端 → 后端（Protobuf 版）
 // recover 放在循环内: panic 后 goroutine 继续工作,而不是退出
 func proxyClientToBackend(ps *proxySession) {
+	defer close(ps.done) // 🔴 退出时通知 proxyBackendToClient 收摊
 	for {
 		var readErr error
 		func() {
@@ -563,6 +566,13 @@ func writeBackendMsg(backend *websocket.Conn, data []byte) error {
 // fan-in 3 backend reader → msgCh → 批量合并转发 + login 检测 + 写超时
 func proxyBackendToClient(ps *proxySession) {
 	for {
+		// 🔴 client 已断开 → 整个 proxySession 收摊
+		select {
+		case <-ps.done:
+			return
+		default:
+		}
+
 		// ── Step 1: 快照（原子 Load，无锁！）──
 		m := ps.backends.Load()
 		if m == nil || len(*m) == 0 {
