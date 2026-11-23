@@ -478,13 +478,16 @@ func proxyClientToBackend(ps *proxySession) {
 			// 🔴 一次 Unmarshal 搞定：既拿 name 路由，又保留 p 结构体后面直接填 uid
 			p := &wspb.WSReq{}
 			if proto.Unmarshal(data, p) != nil {
-				return
+				return // Unmarshal 失败 → 丢弃，继续循环
 			}
 			metrics.MessagesIn.Inc()
 
 			nt := routeByName(p.Name)
 			backend, ok := ps.GetBackend(nt)
 			if !ok {
+				// ⚠️ backend 暂时不可用 → 丢弃这条消息，但不退出！
+				// proxyBackendToClient 的重连循环需要时间重建 backend map
+				// 退出 = close(ps.done) → 重连循环也被杀 → 永远恢复不了
 				metrics.ErrorsTotal.WithLabelValues("no_backend_" + nt).Inc()
 				return
 			}
@@ -506,6 +509,8 @@ func proxyClientToBackend(ps *proxySession) {
 			}
 
 			if err := writeBackendMsg(backend, data); err != nil {
+				// backend 写失败 → 丢弃，不退出
+				// 旧 backend WS 可能已被 dialAll Close 了
 				metrics.ErrorsTotal.WithLabelValues("backend_write").Inc()
 			}
 		}()
@@ -576,8 +581,26 @@ func proxyBackendToClient(ps *proxySession) {
 		// ── Step 1: 快照（原子 Load，无锁！）──
 		m := ps.backends.Load()
 		if m == nil || len(*m) == 0 {
-			log.Info("[" + ps.service + "] no backends, exit")
-			return
+			// ❌ 不能 return！return = proxySession 永久退出 → 僵尸连接复现
+			// 直接内联重连逻辑（此处 respBuf 还没声明，不需要 flushBatch）
+			ps.mu.Lock()
+			token := ps.token
+			ps.mu.Unlock()
+			ps.dialAll(token)
+			m = ps.backends.Load()
+			if m == nil || len(*m) == 0 {
+				ps.backoffFailures++
+				delay := time.Duration(1<<min(ps.backoffFailures, 4)) * time.Second
+				if delay > 30*time.Second {
+					delay = 30 * time.Second
+				}
+				log.Warn("["+ps.service+"] all backends offline, backoff", "delay", delay, "failures", ps.backoffFailures)
+				time.Sleep(delay)
+				continue
+			}
+			ps.backoffFailures = 0
+			// 重连成功 → 回到循环顶部启动新 reader
+			continue
 		}
 		type entry struct {
 			name string
@@ -788,7 +811,11 @@ func proxyBackendToClient(ps *proxySession) {
 		_ = flushBatch()
 
 		// msgCh close = 所有 backend readers 死了 → 重连
-		ps.dialAll("")
+		// ✅ 用 ps.token（ProxySession 初始化时存好的初始 token），防止 backend 重建后登录态丢失
+		ps.mu.Lock()
+		token := ps.token
+		ps.mu.Unlock()
+		ps.dialAll(token)
 		m = ps.backends.Load()
 		if m == nil || len(*m) == 0 {
 			ps.backoffFailures++

@@ -264,13 +264,24 @@ const autoSaveInterval = 30 * time.Second
 const saveConcurrency = 10 // 定时落盘最大并发数（防 MySQL 连接池耗尽）
 
 // StartAutoSave 启动定时落盘 goroutine（进程启动时调一次）
+// 加 defer recover + 自重启，防止 saveDirtyUids panic 炸进程
 func (c *ItemController) StartAutoSave() {
 	go func() {
-		log.Info("[Inventory] auto-save started", "interval", autoSaveInterval, "concurrency", saveConcurrency)
-		ticker := time.NewTicker(autoSaveInterval)
-		defer ticker.Stop()
-		for range ticker.C {
-			c.saveDirtyUids()
+		for {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error("[Inventory] auto-save PANIC", "err", r)
+					}
+				}()
+				log.Info("[Inventory] auto-save started", "interval", autoSaveInterval, "concurrency", saveConcurrency)
+				ticker := time.NewTicker(autoSaveInterval)
+				defer ticker.Stop()
+				for range ticker.C {
+					c.saveDirtyUids()
+				}
+			}()
+			time.Sleep(5 * time.Second) // panic 后冷却再重启
 		}
 	}()
 }

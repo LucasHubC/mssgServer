@@ -9,6 +9,7 @@ import (
 	"mssgServer/infra/log"
 	"mssgServer/infra/metrics"
 	rediscache "mssgServer/infra/redis"
+	"mssgServer/infra/util"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -95,8 +96,16 @@ func main() {
 	log.Info("[Gateway] starting on", addr, "policy=", policy)
 	log.Info("[Gateway] WS proxy:  ws://" + addr + "/ws?token=xxx")
 	log.Info("[Gateway] admin APIs: /admin/broadcast, /admin/push, /admin/kick")
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+
+	// ✅ 自定义 TCP Listener：增大 backlog 4096，和 Broker 保持一致
+	ln, err := util.ListenTCP(addr, 4096)
+	if err != nil {
 		log.Fatal("[Gateway] listen failed", "err", err)
+	}
+	log.Info("[Gateway] TCP backlog=4096")
+
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		log.Fatal("[Gateway] serve failed", "err", err)
 	}
 
 	fmt.Println("👋 gatewayServer bye~")

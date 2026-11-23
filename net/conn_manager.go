@@ -99,6 +99,7 @@ func (cm *ConnectionManager) BindUid(uid string, ws *WSServer, skipRedis bool) {
 	}
 	cm.uidMap[uid] = ws
 	metrics.UIDMapSize.Set(float64(len(cm.uidMap)))
+	metrics.Connections.Set(float64(len(cm.conns))) // ✅ 踢旧后立刻同步
 	cm.mu.Unlock()
 
 	// ⚠️ 不再做跨节点 kick！

@@ -116,8 +116,14 @@ func Init(nodeAddr string) {
 }
 
 // Close 停止 RPC 模块（优雅退出用）
+// 幂等：多次调用不会 panic
 func Close() {
-	close(closeChan)
+	select {
+	case <-closeChan:
+		// 已关闭
+	default:
+		close(closeChan)
+	}
 }
 
 // ────────────────────────────────────────
