@@ -301,26 +301,33 @@ func (cm *ConnectionManager) pushToLocalUids(uids []string, name string, data in
 //
 // 启动位置：loginServer.go / chatServer.go 的 main() 里各启一个
 func (cm *ConnectionManager) StartHeartbeatLoop() {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
+	for {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("[HeartbeatLoop] PANIC", "err", r)
+				}
+			}()
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				cm.mu.RLock()
+				uids := make([]string, 0, len(cm.uidMap))
+				for uid := range cm.uidMap {
+					uids = append(uids, uid)
+				}
+				cm.mu.RUnlock()
 
-	for range ticker.C {
-		cm.mu.RLock()
-		uids := make([]string, 0, len(cm.uidMap))
-		for uid := range cm.uidMap {
-			uids = append(uids, uid)
-		}
-		cm.mu.RUnlock()
+				if len(uids) == 0 {
+					continue
+				}
 
-		if len(uids) == 0 {
-			continue
-		}
-
-		// Pipeline 批量续期 —— N 次 SET 合成 1 次网络往返
-		// 5000 用户：耗时从 ~500ms 降到 ~10ms
-		nodeAddr := rediscache.GetMyNodeAddr()
-		rediscache.TouchUserHeartbeatBatch(uids, nodeAddr)
-		log.Debug("[Heartbeat] online renewed", "count", len(uids))
+				nodeAddr := rediscache.GetMyNodeAddr()
+				rediscache.TouchUserHeartbeatBatch(uids, nodeAddr)
+				log.Debug("[Heartbeat] online renewed", "count", len(uids))
+			}
+		}()
+		time.Sleep(5 * time.Second) // panic 后冷却再重启
 	}
 }
 
@@ -348,54 +355,64 @@ func (cm *ConnectionManager) OnlineUids() []string {
 //   - "push":     其他节点请求给某个 uid 推消息
 //   - "broadcast":其他节点请求全服广播（本机部分）
 func (cm *ConnectionManager) SubscribeRemoteBroadcast() {
-	rediscache.SubscribeBroadcast(func(msg rediscache.BroadcastMsg) {
-		// 🟢 跳过自己发的 —— 避免 BroadcastAll 本机被推两遍
-		// （PublishBroadcast 会自动填 FromNode = myNodeAddr）
-		if msg.FromNode != "" && msg.FromNode == rediscache.GetMyNodeAddr() {
-			return
-		}
+	for {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("[SubscribeRemoteBroadcast] PANIC", "err", r)
+				}
+			}()
+			rediscache.SubscribeBroadcast(func(msg rediscache.BroadcastMsg) {
+				// 🟢 跳过自己发的 —— 避免 BroadcastAll 本机被推两遍
+				// （PublishBroadcast 会自动填 FromNode = myNodeAddr）
+				if msg.FromNode != "" && msg.FromNode == rediscache.GetMyNodeAddr() {
+					return
+				}
 
-		switch msg.Action {
-		case "kick":
-			// kick 统一链路：admin/kick → Redis kick → 所有后端 Subscribe kick
-			//   → 后端 Close Gateway 的 backend WS → Gateway reader 全退
-			//   → proxyBackendToClient return → HandleWSProxy defer Close client WS
-			cm.mu.Lock()
-			if ws, ok := cm.uidMap[msg.Target]; ok {
-				log.Info("[Redis] remote kick: closing WS", "uid", msg.Target, "from", msg.FromNode)
-				delete(cm.uidMap, msg.Target)
-				delete(cm.conns, ws)
-				cm.mu.Unlock()
-				rediscache.UnbindUser(msg.Target)
-				go ws.Close() // Close Gateway backend WS → Gateway reader 全退
-			} else {
-				cm.mu.Unlock()
-			}
+				switch msg.Action {
+				case "kick":
+					// kick 统一链路：admin/kick → Redis kick → 所有后端 Subscribe kick
+					//   → 后端 Close Gateway 的 backend WS → Gateway reader 全退
+					//   → proxyBackendToClient return → HandleWSProxy defer Close client WS
+					cm.mu.Lock()
+					if ws, ok := cm.uidMap[msg.Target]; ok {
+						log.Info("[Redis] remote kick: closing WS", "uid", msg.Target, "from", msg.FromNode)
+						delete(cm.uidMap, msg.Target)
+						delete(cm.conns, ws)
+						cm.mu.Unlock()
+						rediscache.UnbindUser(msg.Target)
+						go ws.Close() // Close Gateway backend WS → Gateway reader 全退
+					} else {
+						cm.mu.Unlock()
+					}
 
-		case "push":
-			if ws := cm.GetByUid(msg.Target); ws != nil {
-				log.Debug("[Redis] remote push received", "uid", msg.Target, "name", msg.Name, "from", msg.FromNode)
-				ws.Push(msg.Name, msg.Data)
-			}
+				case "push":
+					if ws := cm.GetByUid(msg.Target); ws != nil {
+						log.Debug("[Redis] remote push received", "uid", msg.Target, "name", msg.Name, "from", msg.FromNode)
+						ws.Push(msg.Name, msg.Data)
+					}
 
-		case "broadcast":
-			log.Debug("[Redis] remote broadcast received", "name", msg.Name, "from", msg.FromNode)
-			cm.Broadcast(msg.Name, msg.Data)
+				case "broadcast":
+					log.Debug("[Redis] remote broadcast received", "name", msg.Name, "from", msg.FromNode)
+					cm.Broadcast(msg.Name, msg.Data)
 
-		case "group":
-			// Action="group" → Target 就是 groupId
-			groupIds := rediscache.GetGroupMembers(msg.Target)
-			log.Debug("[Redis] remote group msg", "group", msg.Target, "members", len(groupIds), "from", msg.FromNode)
-			cm.pushToLocalUids(groupIds, msg.Name, msg.Data)
+				case "group":
+					// Action="group" → Target 就是 groupId
+					groupIds := rediscache.GetGroupMembers(msg.Target)
+					log.Debug("[Redis] remote group msg", "group", msg.Target, "members", len(groupIds), "from", msg.FromNode)
+					cm.pushToLocalUids(groupIds, msg.Name, msg.Data)
 
-		case "room":
-			// Action="room" → Target 就是 roomId
-			roomMembers := rediscache.GetRoomMembers(msg.Target)
-			log.Debug("[Redis] remote room msg", "room", msg.Target, "members", len(roomMembers), "from", msg.FromNode)
-			cm.pushToLocalUids(roomMembers, msg.Name, msg.Data)
+				case "room":
+					// Action="room" → Target 就是 roomId
+					roomMembers := rediscache.GetRoomMembers(msg.Target)
+					log.Debug("[Redis] remote room msg", "room", msg.Target, "members", len(roomMembers), "from", msg.FromNode)
+					cm.pushToLocalUids(roomMembers, msg.Name, msg.Data)
 
-		default:
-			log.Warn("[Redis] unknown broadcast action", "action", msg.Action)
-		}
-	})
+				default:
+					log.Warn("[Redis] unknown broadcast action", "action", msg.Action)
+				}
+			})
+		}()
+		time.Sleep(5 * time.Second) // panic 后冷却再重启
+	}
 }

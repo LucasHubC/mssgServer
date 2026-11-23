@@ -4,7 +4,12 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"sort"
+	"sync/atomic"
 )
+
+// roundRobinCounter 全局轮询计数器
+// 每次 round_robin 路由时 +1，取模得到节点下标
+var roundRobinCounter int64
 
 // RoutePolicy 路由策略枚举
 type RoutePolicy string
@@ -42,11 +47,8 @@ func PickNode(nodes []*Node, policy RoutePolicy, uid string) *Node {
 		return candidates[idx]
 
 	default: // PolicyRoundRobin
-		// 轮询：选 score 最小的
-		sort.Slice(candidates, func(i, j int) bool {
-			return candidates[i].Score() < candidates[j].Score()
-		})
-		candidates[0].IncrScore()
-		return candidates[0]
+		// 原子计数器 + 取模，简单确定，不依赖 sort 稳定性
+		idx := int(atomic.AddInt64(&roundRobinCounter, 1)-1) % len(candidates)
+		return candidates[idx]
 	}
 }

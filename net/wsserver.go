@@ -407,7 +407,9 @@ func (s *WSServer) Close() {
 		close(s.outChan)
 		s.sendMu.Unlock()
 		close(s.done)
-		s.wsConn.Close()
+		if s.wsConn != nil {
+			s.wsConn.Close()
+		}
 	})
 }
 

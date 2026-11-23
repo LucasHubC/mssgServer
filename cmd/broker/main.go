@@ -59,6 +59,11 @@ func main() {
 
 	// 心跳协程
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[Broker] heartbeat goroutine PANIC", "err", r)
+			}
+		}()
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {

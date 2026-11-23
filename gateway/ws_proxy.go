@@ -189,17 +189,24 @@ func UnregisterUID(uid string) {
 // Broker 进程启动时调用一次（sync.Once 保证只启动一个 goroutine）
 func StartKickListener() {
 	kickListenerOnce.Do(func() {
-		go redis.SubscribeBroadcast(func(msg redis.BroadcastMsg) {
-			if msg.Action != "kick" {
-				return
-			}
-			if ws, ok := uidToClientWS.Load(msg.Target); ok {
-				if client, ok2 := ws.(*websocket.Conn); ok2 {
-					log.Info("[Broker] 🦵 admin/kick → Close client WS", "uid", msg.Target)
-					client.Close()
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("[Broker] StartKickListener PANIC", "err", r)
 				}
-			}
-		})
+			}()
+			redis.SubscribeBroadcast(func(msg redis.BroadcastMsg) {
+				if msg.Action != "kick" {
+					return
+				}
+				if ws, ok := uidToClientWS.Load(msg.Target); ok {
+					if client, ok2 := ws.(*websocket.Conn); ok2 {
+						log.Info("[Broker] 🦵 admin/kick → Close client WS", "uid", msg.Target)
+						client.Close()
+					}
+				}
+			})
+		}()
 	})
 }
 
@@ -237,6 +244,11 @@ func (ps *proxySession) dialAll(token string) {
 		wg.Add(1)
 		go func(nodeType string) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("["+ps.service+"] ⚠️ dialAll PANIC", "type", nodeType, "err", r)
+				}
+			}()
 			routeResp := ps.nodeProvider.Route(rpc.RouteReq{Type: nodeType})
 			if routeResp.Code != 0 {
 				log.Warn("["+ps.service+"] ❌ Route failed", "type", nodeType, "code", routeResp.Code)

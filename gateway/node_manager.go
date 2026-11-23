@@ -98,7 +98,14 @@ func (g *Gateway) Route(req rpc.RouteReq) *rpc.RouteResp {
 		return &rpc.RouteResp{Code: -1, Msg: "no available node for type: " + req.Type}
 	}
 
-	picked := PickNode(alive, g.policy, req.UId)
+	// broker 强制 round_robin：dispatch 时心跳 Online 还没同步，least_conn/uid_hash 都会卡死在一个节点
+	// login/chat/room 继续用配置的策略（后端节点心跳同步稳定后 least_conn 才有意义）
+	policy := g.policy
+	if req.Type == "broker" {
+		policy = PolicyRoundRobin
+	}
+
+	picked := PickNode(alive, policy, req.UId)
 	return &rpc.RouteResp{Code: 0, Addr: picked.Addr}
 }
 
@@ -253,6 +260,8 @@ func (g *Gateway) HandleDispatch(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	log.Info("[Gateway] 📦 dispatch OK", "uid", uid, "broker", routeResp.Addr)
 
 	// routeResp.Addr = broker 注册的 ws://addr
 	brokerURL := routeResp.Addr

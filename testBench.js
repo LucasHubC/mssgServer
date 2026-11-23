@@ -124,7 +124,7 @@ function unwrapWSResp(p) {
 
 const args = {
     conns: 1000, rate: 10, duration: 30,
-    url: 'ws://127.0.0.1:9001/ws', dispatch: false,
+    url: 'ws://127.0.0.1:9001/ws', dispatch: true,
     mode: 'mixed',
     // mixed 模式各协议比例（加起来 1.0，剩下的给 inventory）
     worldRatio: 0.2, privateRatio: 0.2, roomRatio: 0.2, groupRatio: 0.1,
@@ -187,23 +187,32 @@ function printStats() {
     console.log(`\r[${elapsed.toFixed(0)}s] conn=${stats.connected} login=${stats.loginOk}✅/${stats.loginFail}❌ sent=${stats.sent} (${sendQPS}/s) recv=${stats.recv} (${recvQPS}/s) ratio=${recvRatio}% err=${stats.errors}`, { clear: true });
 }
 
-async function resolveBrokerURL() {
+// 每个 client 独立 dispatch → Gateway round_robin 均匀分到不同 broker
+async function resolveBrokerURL(idx) {
     if (!args.dispatch) return args.url;
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         const url = new URL(args.url);
         const gwHost = `http://${url.hostname}:9000`;
-        http.get(`${gwHost}/gateway/dispatch?uid=bench_user`, res => {
+        // uid 必须唯一，否则 Gateway uid_hash 策略会把相同 uid 分到同一 broker
+        http.get(`${gwHost}/gateway/dispatch?uid=bench_dispatch_${idx}&token=stress`, res => {
             let d = '';
             res.on('data', c => d += c);
-            res.on('end', () => { try { resolve(JSON.parse(d).broker_url || args.url); } catch { resolve(args.url); } });
-        }).on('error', reject);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(d);
+                    if (parsed.broker_url) resolve(parsed.broker_url);
+                    else resolve(args.url);
+                } catch { resolve(args.url); }
+            });
+        }).on('error', () => resolve(args.url));
     });
 }
 
 async function run() {
-    const brokerURL = await resolveBrokerURL();
     console.log(`\n🚀 压测开始`);
-    console.log(`   目标: ${brokerURL}`);
+    const brokerURL = await resolveBrokerURL(0);
+    console.log(`   目标: ${args.dispatch ? '(Gateway dispatch 动态路由)' : brokerURL}`);
+    console.log(`   dispatch: ${args.dispatch ? '✅ 开启（每个 client 独立路由）' : '❌ 关闭（全连同一个 broker）'}`);
     console.log(`   连接数: ${args.conns}  速率: ${args.rate}  模式: ${args.mode}${args.mode==='mixed'?`(world${args.worldRatio*100}%)`:''}`);
     console.log(`   持续: ${args.duration}s\n`);
 
@@ -214,7 +223,11 @@ async function run() {
     const batchSize = 500;
     for (let i = 0; i < args.conns; i += batchSize) {
         const batch = Math.min(batchSize, args.conns - i);
-        await Promise.all(Array.from({ length: batch }, (_, j) => connect(brokerURL, i + j, sendInterval)));
+        await Promise.all(Array.from({ length: batch }, async (_, j) => {
+            // 每个 client 独立 dispatch → Gateway round_robin 均匀分到不同 broker
+            const url = await resolveBrokerURL(i + j);
+            return connect(url, i + j, sendInterval);
+        }));
     }
 
     stats.connectTime = ((performance.now() - connectStart) / 1000).toFixed(2);

@@ -132,15 +132,23 @@ func main() {
 		log.Warn("register to gateway failed (is gateway running?)", "err", err)
 	}
 	// 心跳协程：每 5s 上报一次当前在线人数
+	// recover 只包单次 Heartbeat 调用：panic 不退出循环，继续等下一个 tick
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			rpc.Heartbeat(gatewayURL, rpc.NodeHeartbeatReq{
-				Type:   "login",
-				Addr:   nodeAddr,
-				Online: net.ConnManager.Total(),
-			})
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error("[Login] heartbeat PANIC", "err", r)
+					}
+				}()
+				rpc.Heartbeat(gatewayURL, rpc.NodeHeartbeatReq{
+					Type:   "login",
+					Addr:   nodeAddr,
+					Online: net.ConnManager.Total(),
+				})
+			}()
 		}
 	}()
 
