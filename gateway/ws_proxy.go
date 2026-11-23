@@ -34,8 +34,12 @@ import (
 //
 // ═══════════════════════════════════════════════════════════
 const (
-	maxGlobalWSConns = 5000 // L1: 全局最大 WS 连接数
+	maxGlobalWSConns = 5000 // L1: 全局并发上限
 	maxPerIPConns    = 2000 // L2: 单 IP 最大并发（压测单 IP 1000，够；生产改 100）
+
+	// proxy WS 心跳参数（和 net/wsserver.go 保持一致）
+	proxyPingInterval = 30 * time.Second
+	proxyPongTimeout  = 90 * time.Second // 3 个 Ping 周期没 Pong → 判定死连接
 )
 
 var (
@@ -363,6 +367,23 @@ func HandleWSProxy(w http.ResponseWriter, r *http.Request, service string, np No
 	defer metrics.Connections.Dec()
 	defer clientWS.Close()
 
+	// 🔴 WS 僵尸连接自动清理：ReadDeadline + Ping/Pong
+	// 和 net/wsserver.go 一样的机制，确保 Ctrl+C 杀进程后 ReadMessage 能超时退出
+	clientWS.SetPongHandler(func(string) error {
+		_ = clientWS.SetReadDeadline(time.Now().Add(proxyPongTimeout))
+		return nil
+	})
+	_ = clientWS.SetReadDeadline(time.Now().Add(proxyPongTimeout))
+	go func() {
+		ticker := time.NewTicker(proxyPingInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := clientWS.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				return // Ping 写失败（连接已关），退出让 reader 超时清理
+			}
+		}
+	}()
+
 	initialToken := r.URL.Query().Get("token")
 	nodeTypes := []string{"login", "chat", "room"}
 
@@ -418,7 +439,18 @@ func dialBackend(addr, token string) (*websocket.Conn, error) {
 		HandshakeTimeout: 2 * time.Second,
 	}
 	c, _, err := dialer.DialContext(ctx, parsed.String(), nil)
-	return c, err
+	if err != nil {
+		return nil, err
+	}
+
+	// 🔴 backend WS 僵尸连接自动清理
+	// login/chat/room 有 pingLoop 定期发 Ping → 这里 PongHandler 续期 deadline
+	c.SetPongHandler(func(string) error {
+		_ = c.SetReadDeadline(time.Now().Add(proxyPongTimeout))
+		return nil
+	})
+	_ = c.SetReadDeadline(time.Now().Add(proxyPongTimeout))
+	return c, nil
 }
 
 // proxyClientToBackend 客户端 → 后端（Protobuf 版）
