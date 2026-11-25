@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -350,6 +351,13 @@ func clientIP(r *http.Request) string {
 // service: 调用方名称，如 "Gateway" 或 "Broker"（用于日志前缀）
 // np: NodeProvider — Gateway struct（进程内直接方法调用）或 HTTP 客户端（Broker 进程间 HTTP 调用）
 func HandleWSProxy(w http.ResponseWriter, r *http.Request, service string, np NodeProvider) {
+	// 🔴 最外层 recover：任何 panic 都不能炸 Broker/Gateway 进程
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Error("["+service+"] 💥 HandleWSProxy PANIC", "err", rec, "stack", debug.Stack())
+		}
+	}()
+
 	// 🔒 三层限流检查（在 Upgrade 之前拦截，避免无效握手消耗资源）
 	ip := clientIP(r)
 	if ok, reason := tryAcquireWS(ip); !ok {
